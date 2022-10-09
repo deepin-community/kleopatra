@@ -1,0 +1,229 @@
+# Copyright (C) YEAR This_file_is_part_of_KDE
+# This file is distributed under the same license as the PACKAGE package.
+#
+# Chetan Khona <chetan@kompkin.com>, 2013.
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: https://bugs.kde.org\n"
+"POT-Creation-Date: 2021-06-21 00:19+0000\n"
+"PO-Revision-Date: 2013-03-11 16:15+0530\n"
+"Last-Translator: Chetan Khona <chetan@kompkin.com>\n"
+"Language-Team: Marathi <kde-i18n-doc@kde.org>\n"
+"Language: mr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n!=1);\n"
+"X-Generator: Lokalize 1.5\n"
+
+#, kde-format
+msgctxt "NAME OF TRANSLATORS"
+msgid "Your names"
+msgstr "चेतन खोना"
+
+#, kde-format
+msgctxt "EMAIL OF TRANSLATORS"
+msgid "Your emails"
+msgstr "chetan@kompkin.com"
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Steffen Hansen"
+msgstr "स्टेफ्फेन हान्सेन"
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Original Author"
+msgstr "मूळ लेखक"
+
+#: aboutdata.cpp:28
+#, kde-format
+msgid "KWatchGnuPG"
+msgstr ""
+
+#: aboutdata.cpp:29
+#, kde-format
+msgid "GnuPG log viewer"
+msgstr ""
+
+#: aboutdata.cpp:30
+#, kde-format
+msgid "(c) 2004 Klarälvdalens Datakonsult AB\n"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:54
+#, kde-format
+msgctxt "@title:window"
+msgid "Configure KWatchGnuPG"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:70
+#, kde-format
+msgid "WatchGnuPG"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:80
+#, kde-format
+msgid "&Executable:"
+msgstr "एक्जीक्यूटेबल (&E):"
+
+#: kwatchgnupgconfig.cpp:89
+#, kde-format
+msgid "&Socket:"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:98
+#, kde-format
+msgid "None"
+msgstr "काही नाही"
+
+#: kwatchgnupgconfig.cpp:99
+#, kde-format
+msgid "Basic"
+msgstr "मूळ"
+
+#: kwatchgnupgconfig.cpp:100
+#, kde-format
+msgid "Advanced"
+msgstr "प्रगत"
+
+#: kwatchgnupgconfig.cpp:101
+#, kde-format
+msgid "Expert"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:102
+#, kde-format
+msgid "Guru"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:103
+#, kde-format
+msgid "Default &log level:"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:111
+#, kde-format
+msgid "Log Window"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:123
+#, kde-format
+msgctxt "history size spinbox suffix"
+msgid " line"
+msgid_plural " lines"
+msgstr[0] " ओळ"
+msgstr[1] " ओळी"
+
+#: kwatchgnupgconfig.cpp:124
+#, kde-format
+msgid "unlimited"
+msgstr "अमर्यादीत"
+
+#: kwatchgnupgconfig.cpp:125
+#, kde-format
+msgid "&History size:"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:129
+#, kde-format
+msgid "Set &Unlimited"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:136
+#, kde-format
+msgid "Enable &word wrapping"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:83
+#, kde-format
+msgid "[%1] Log cleared"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:90
+#, kde-format
+msgid "C&lear History"
+msgstr "इतिहास काढून टाका (&l)"
+
+#: kwatchgnupgmainwin.cpp:125
+#, kde-format
+msgid "[%1] Log stopped"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:141
+#, kde-format
+msgid ""
+"The watchgnupg logging process could not be started.\n"
+"Please install watchgnupg somewhere in your $PATH.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:143
+#, kde-format
+msgid "[%1] Log started"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:201
+#, kde-format
+msgid "There are no components available that support logging."
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid ""
+"The watchgnupg logging process died.\n"
+"Do you want to try to restart it?"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Try Restart"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Do Not Try"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:208
+#, kde-format
+msgid "====== Restarting logging process ====="
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:212
+#, kde-format
+msgid ""
+"The watchgnupg logging process is not running.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:247
+#, kde-format
+msgid "Save Log to File"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:255
+#, kde-format
+msgid "Could not save file %1: %2"
+msgstr ""
+
+#. i18n: ectx: Menu (file)
+#: kwatchgnupgui.rc:4
+#, kde-format
+msgid "&File"
+msgstr "फाईल (&F)"
+
+#. i18n: ectx: ToolBar (mainToolBar)
+#: kwatchgnupgui.rc:13
+#, kde-format
+msgid "Main Toolbar"
+msgstr "मुख्य साधनपट्टी"
+
+#: tray.cpp:29
+#, kde-format
+msgid "KWatchGnuPG Log Viewer"
+msgstr ""
+
+#~ msgid "Overwrite File"
+#~ msgstr "फाईल खोडून पुन्हा लिहा"

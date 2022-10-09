@@ -1,0 +1,241 @@
+# translation of kwatchgnupg.po to Italian
+# Alessandro Pasotti <ale.pas@tiscalinet.it>, 2004, 2005.
+# Luciano Montanaro <mikelima@cirulla.net>, 2007, 2008.
+# Vincenzo Reale <smart2128vr@gmail.com>, 2020.
+msgid ""
+msgstr ""
+"Project-Id-Version: kwatchgnupg\n"
+"Report-Msgid-Bugs-To: https://bugs.kde.org\n"
+"POT-Creation-Date: 2021-06-21 00:19+0000\n"
+"PO-Revision-Date: 2020-02-25 09:56+0100\n"
+"Last-Translator: Vincenzo Reale <smart2128vr@gmail.com>\n"
+"Language-Team: Italian <kde-i18n-it@kde.org>\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Lokalize 19.12.2\n"
+
+#, kde-format
+msgctxt "NAME OF TRANSLATORS"
+msgid "Your names"
+msgstr "Vincenzo Reale, Alessandro Pasotti"
+
+#, kde-format
+msgctxt "EMAIL OF TRANSLATORS"
+msgid "Your emails"
+msgstr "smart2128vr@gmail.com,"
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Steffen Hansen"
+msgstr "Steffen Hansen"
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Original Author"
+msgstr "Autore originale"
+
+#: aboutdata.cpp:28
+#, kde-format
+msgid "KWatchGnuPG"
+msgstr "KWatchGnuPG"
+
+#: aboutdata.cpp:29
+#, kde-format
+msgid "GnuPG log viewer"
+msgstr "Visualizzatore log GnuPG"
+
+#: aboutdata.cpp:30
+#, kde-format
+msgid "(c) 2004 Klarälvdalens Datakonsult AB\n"
+msgstr "© 2004 Klarälvdalens Datakonsult AB\n"
+
+#: kwatchgnupgconfig.cpp:54
+#, kde-format
+msgctxt "@title:window"
+msgid "Configure KWatchGnuPG"
+msgstr "Configura KWatchGnuPG"
+
+#: kwatchgnupgconfig.cpp:70
+#, kde-format
+msgid "WatchGnuPG"
+msgstr "WatchGnuPG"
+
+#: kwatchgnupgconfig.cpp:80
+#, kde-format
+msgid "&Executable:"
+msgstr "&Eseguibile:"
+
+#: kwatchgnupgconfig.cpp:89
+#, kde-format
+msgid "&Socket:"
+msgstr "&Socket:"
+
+#: kwatchgnupgconfig.cpp:98
+#, kde-format
+msgid "None"
+msgstr "Nessuno"
+
+#: kwatchgnupgconfig.cpp:99
+#, kde-format
+msgid "Basic"
+msgstr "Base"
+
+#: kwatchgnupgconfig.cpp:100
+#, kde-format
+msgid "Advanced"
+msgstr "Avanzato"
+
+#: kwatchgnupgconfig.cpp:101
+#, kde-format
+msgid "Expert"
+msgstr "Esperto"
+
+#: kwatchgnupgconfig.cpp:102
+#, kde-format
+msgid "Guru"
+msgstr "Guru"
+
+#: kwatchgnupgconfig.cpp:103
+#, kde-format
+msgid "Default &log level:"
+msgstr "Livello predefinito &log:"
+
+#: kwatchgnupgconfig.cpp:111
+#, kde-format
+msgid "Log Window"
+msgstr "Finestra log"
+
+#: kwatchgnupgconfig.cpp:123
+#, kde-format
+msgctxt "history size spinbox suffix"
+msgid " line"
+msgid_plural " lines"
+msgstr[0] " riga"
+msgstr[1] " righe"
+
+#: kwatchgnupgconfig.cpp:124
+#, kde-format
+msgid "unlimited"
+msgstr "illimitata"
+
+#: kwatchgnupgconfig.cpp:125
+#, kde-format
+msgid "&History size:"
+msgstr "Dimensione &cronologia:"
+
+#: kwatchgnupgconfig.cpp:129
+#, kde-format
+msgid "Set &Unlimited"
+msgstr "Imposta &illimitata"
+
+#: kwatchgnupgconfig.cpp:136
+#, kde-format
+msgid "Enable &word wrapping"
+msgstr "Abilita parole a &capo"
+
+#: kwatchgnupgmainwin.cpp:83
+#, kde-format
+msgid "[%1] Log cleared"
+msgstr "[%1] Log pulito"
+
+#: kwatchgnupgmainwin.cpp:90
+#, kde-format
+msgid "C&lear History"
+msgstr "Ripuli&sci la cronologia"
+
+#: kwatchgnupgmainwin.cpp:125
+#, kde-format
+msgid "[%1] Log stopped"
+msgstr "[%1] Log fermato"
+
+#: kwatchgnupgmainwin.cpp:141
+#, kde-format
+msgid ""
+"The watchgnupg logging process could not be started.\n"
+"Please install watchgnupg somewhere in your $PATH.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+"Impossibile avviare il processo di log di watchgnupg.\n"
+"Installa whatchgnupg da qualche parte nel tuo $PATH.\n"
+"Questa finestra di log non può mostrare informazioni utili."
+
+#: kwatchgnupgmainwin.cpp:143
+#, kde-format
+msgid "[%1] Log started"
+msgstr "[%1] Log avviato"
+
+#: kwatchgnupgmainwin.cpp:201
+#, kde-format
+msgid "There are no components available that support logging."
+msgstr "Non ci sono componenti disponibili che supportano il log."
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid ""
+"The watchgnupg logging process died.\n"
+"Do you want to try to restart it?"
+msgstr ""
+"Il processo di log di watchgnupg è morto.\n"
+"Vuoi provare a riavviarlo?"
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Try Restart"
+msgstr "Prova a riavviare"
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Do Not Try"
+msgstr "Non provare"
+
+#: kwatchgnupgmainwin.cpp:208
+#, kde-format
+msgid "====== Restarting logging process ====="
+msgstr "====== Riavvio log in corso ====="
+
+#: kwatchgnupgmainwin.cpp:212
+#, kde-format
+msgid ""
+"The watchgnupg logging process is not running.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+"Il processo di log di watchgnupg non sta girando.\n"
+"Questa finestra di log non può mostrare informazioni utili."
+
+#: kwatchgnupgmainwin.cpp:247
+#, kde-format
+msgid "Save Log to File"
+msgstr "Salva il log in un file"
+
+#: kwatchgnupgmainwin.cpp:255
+#, kde-format
+msgid "Could not save file %1: %2"
+msgstr "Non è stato possibile salvare il file %1: %2"
+
+#. i18n: ectx: Menu (file)
+#: kwatchgnupgui.rc:4
+#, kde-format
+msgid "&File"
+msgstr "&File"
+
+#. i18n: ectx: ToolBar (mainToolBar)
+#: kwatchgnupgui.rc:13
+#, kde-format
+msgid "Main Toolbar"
+msgstr "Barra degli strumenti principale"
+
+#: tray.cpp:29
+#, kde-format
+msgid "KWatchGnuPG Log Viewer"
+msgstr "KWatchGnuPG visualizzatore di log"
+
+#~ msgid ""
+#~ "The file named \"%1\" already exists. Are you sure you want to overwrite "
+#~ "it?"
+#~ msgstr "Il file «%1» esiste già. Sei sicuro di volerlo sovrascrivere?"
+
+#~ msgid "Overwrite File"
+#~ msgstr "Sovrascrivi file"

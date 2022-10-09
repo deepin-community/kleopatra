@@ -1,0 +1,2 @@
+rm_conffile /etc/xdg/kleopatra.categories 4:20.04.1-2~
+rm_conffile /etc/xdg/kleopatra.renamecategories 4:20.04.1-2~

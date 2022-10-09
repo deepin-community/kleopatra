@@ -1,0 +1,4 @@
+# private libs
+kleopatra: package-name-doesnt-match-sonames libkleopatraclientcore1 libkleopatraclientgui1
+# private libs
+kleopatra: no-symbols-control-file

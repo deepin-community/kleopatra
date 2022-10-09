@@ -1,0 +1,58 @@
+From a0883f369a6558990011f706444e53b373b68d8d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ingo=20Kl=C3=B6cker?= <dev@ingo-kloecker.de>
+Date: Thu, 23 Sep 2021 10:01:53 +0200
+Subject: [PATCH] Ask GnuPG for the correct path for the uiserver socket
+
+Calling GpgME::dirInfo() which uses 'gpgconf --list-dirs' implicitly
+creates the socket directory (since gpg 2.1.20), so we omit a check.
+For older versions of gpg (which are unsupported since a long time)
+we keep using the old code which may create a gnupg home directory
+with unsafe permissions.
+
+GnuPG-bug-id: 5619
+BUG: 441957
+FIXED-IN: 21.08.2
+---
+ src/uiserver/uiserver.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/uiserver/uiserver.cpp b/src/uiserver/uiserver.cpp
+index d9746f0b..ab4d2ca7 100644
+--- a/src/uiserver/uiserver.cpp
++++ b/src/uiserver/uiserver.cpp
+@@ -23,6 +23,8 @@
+ #include "kleopatra_debug.h"
+ #include <KLocalizedString>
+ 
++#include <gpgme++/global.h>
++
+ #include <QTcpSocket>
+ #include <QDir>
+ #include <QEventLoop>
+@@ -234,10 +236,23 @@ QString UiServer::Private::makeFileName(const QString &socket) const
+     if (!socket.isEmpty()) {
+         return socket;
+     }
++    const QString socketPath{QString::fromUtf8(GpgME::dirInfo("uiserver-socket"))};
++    if (!socketPath.isEmpty()) {
++        // Note: The socket directory exists after GpgME::dirInfo() has been called.
++        return socketPath;
++    }
++    // GPGME (or GnuPG) is too old to return the socket path.
++    // In this case we fallback to assume that the socket directory is
++    // the home directory as we did in the past.  This is not correct but
++    // probably the safest fallback we can do despite that it is a
++    // bug to assume the socket directory in the home directory.  See
++    // https://dev.gnupg.org/T5613
+     const QString gnupgHome = gnupgHomeDirectory();
+     if (gnupgHome.isEmpty()) {
+         throw_<std::runtime_error>(i18n("Could not determine the GnuPG home directory. Consider setting the GNUPGHOME environment variable."));
+     }
++    // We should not create the home directory, but this only happens for very
++    // old and long unsupported versions of gnupg.
+     ensureDirectoryExists(gnupgHome);
+     const QDir dir(gnupgHome);
+     Q_ASSERT(dir.exists());
+-- 
+GitLab
+

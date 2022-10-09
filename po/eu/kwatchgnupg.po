@@ -1,0 +1,255 @@
+# translation of kwatchgnupg.po to Euskara
+# translation of kwatchgnupg.po to Basque
+# Marcos  <marcos@euskalgnu.org>, 2005.
+# Ion Gaztañaga <ion_g_m@hotmail.com>, 2005.
+# Ion Gaztañaga <igaztanaga@gmail.com>, 2005.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: kwatchgnupg\n"
+"Report-Msgid-Bugs-To: https://bugs.kde.org\n"
+"POT-Creation-Date: 2021-06-21 00:19+0000\n"
+"PO-Revision-Date: 2005-11-19 20:18-0700\n"
+"Last-Translator: Ion Gaztañaga <igaztanaga@gmail.com>\n"
+"Language-Team: Basque <kdeuskaraz@euskalgnu.org>\n"
+"Language: eu\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: KBabel 1.10.2\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#, kde-format
+msgctxt "NAME OF TRANSLATORS"
+msgid "Your names"
+msgstr "Ion Gaztañaga"
+
+#, kde-format
+msgctxt "EMAIL OF TRANSLATORS"
+msgid "Your emails"
+msgstr "igaztanaga@gmail.com"
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Steffen Hansen"
+msgstr ""
+
+#: aboutdata.cpp:24
+#, kde-format
+msgid "Original Author"
+msgstr "Jatorrizko egilea"
+
+#: aboutdata.cpp:28
+#, kde-format
+msgid "KWatchGnuPG"
+msgstr "KWatchGnuPG"
+
+#: aboutdata.cpp:29
+#, kde-format
+msgid "GnuPG log viewer"
+msgstr "GnuPG egunkari ikustailea"
+
+#: aboutdata.cpp:30
+#, kde-format
+msgid "(c) 2004 Klarälvdalens Datakonsult AB\n"
+msgstr ""
+
+#: kwatchgnupgconfig.cpp:54
+#, fuzzy, kde-format
+#| msgid "Configure KWatchGnuPG"
+msgctxt "@title:window"
+msgid "Configure KWatchGnuPG"
+msgstr "Konfiguratu KWatchGnuPG"
+
+#: kwatchgnupgconfig.cpp:70
+#, kde-format
+msgid "WatchGnuPG"
+msgstr "WatchGnuPG"
+
+#: kwatchgnupgconfig.cpp:80
+#, kde-format
+msgid "&Executable:"
+msgstr "&Exekutagarria:"
+
+#: kwatchgnupgconfig.cpp:89
+#, kde-format
+msgid "&Socket:"
+msgstr "&Socket-a:"
+
+#: kwatchgnupgconfig.cpp:98
+#, kde-format
+msgid "None"
+msgstr "Bat ere ez"
+
+#: kwatchgnupgconfig.cpp:99
+#, kde-format
+msgid "Basic"
+msgstr "Oinarrizkoa"
+
+#: kwatchgnupgconfig.cpp:100
+#, kde-format
+msgid "Advanced"
+msgstr "Aurreratua"
+
+#: kwatchgnupgconfig.cpp:101
+#, kde-format
+msgid "Expert"
+msgstr "Aditua"
+
+#: kwatchgnupgconfig.cpp:102
+#, kde-format
+msgid "Guru"
+msgstr "Guru-a"
+
+#: kwatchgnupgconfig.cpp:103
+#, kde-format
+msgid "Default &log level:"
+msgstr "&Egunkari maila lehenetia:"
+
+#: kwatchgnupgconfig.cpp:111
+#, kde-format
+msgid "Log Window"
+msgstr "Egunkari lehioa"
+
+#: kwatchgnupgconfig.cpp:123
+#, fuzzy, kde-format
+#| msgctxt "history size spinbox suffix"
+#| msgid " lines"
+msgctxt "history size spinbox suffix"
+msgid " line"
+msgid_plural " lines"
+msgstr[0] " lerro"
+msgstr[1] " lerro"
+
+#: kwatchgnupgconfig.cpp:124
+#, kde-format
+msgid "unlimited"
+msgstr "mugagabea"
+
+#: kwatchgnupgconfig.cpp:125
+#, kde-format
+msgid "&History size:"
+msgstr "&Historiaren tamaina:"
+
+#: kwatchgnupgconfig.cpp:129
+#, kde-format
+msgid "Set &Unlimited"
+msgstr "Ezarri &mugagabea"
+
+#: kwatchgnupgconfig.cpp:136
+#, kde-format
+msgid "Enable &word wrapping"
+msgstr "Gaitu &hitzen itzulbira"
+
+#: kwatchgnupgmainwin.cpp:83
+#, kde-format
+msgid "[%1] Log cleared"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:90
+#, kde-format
+msgid "C&lear History"
+msgstr "&Garbitu historia"
+
+#: kwatchgnupgmainwin.cpp:125
+#, kde-format
+msgid "[%1] Log stopped"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:141
+#, fuzzy, kde-format
+#| msgid ""
+#| "The watchgnupg logging process could not be started.\n"
+#| "Please install watchgnupg somewhere in your $PATH.\n"
+#| "This log window is now completely useless."
+msgid ""
+"The watchgnupg logging process could not be started.\n"
+"Please install watchgnupg somewhere in your $PATH.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+"Ezin izan da watchgnupg egunkaritze prozesua abiatu.\n"
+"Instalatu watchgnupg nonbait zure $PATH-ean.\n"
+"Egunkari leiho honek ez du ezertarako balio."
+
+#: kwatchgnupgmainwin.cpp:143
+#, kde-format
+msgid "[%1] Log started"
+msgstr ""
+
+#: kwatchgnupgmainwin.cpp:201
+#, kde-format
+msgid "There are no components available that support logging."
+msgstr "Ez dago egunkaritzea onartzen duen osagairik eskuragarri."
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid ""
+"The watchgnupg logging process died.\n"
+"Do you want to try to restart it?"
+msgstr ""
+"watchgnupg prozesua hil egin da.\n"
+"Berriro abiatu nahi al duzu?"
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Try Restart"
+msgstr "Saiatu berrabiatzen"
+
+#: kwatchgnupgmainwin.cpp:207
+#, kde-format
+msgid "Do Not Try"
+msgstr "Ez saiatu"
+
+#: kwatchgnupgmainwin.cpp:208
+#, kde-format
+msgid "====== Restarting logging process ====="
+msgstr "====== Berrabiarazi egunkaritze prozesua ====="
+
+#: kwatchgnupgmainwin.cpp:212
+#, fuzzy, kde-format
+#| msgid ""
+#| "The watchgnupg logging process is not running.\n"
+#| "This log window is now completely useless."
+msgid ""
+"The watchgnupg logging process is not running.\n"
+"This log window is unable to display any useful information."
+msgstr ""
+"watchgnupg egunkaritze prozesua ez dago martxan.\n"
+"Egunkari lehio honek ez du ezertarako balio."
+
+#: kwatchgnupgmainwin.cpp:247
+#, kde-format
+msgid "Save Log to File"
+msgstr "Gorde egunkaria fitxategira"
+
+#: kwatchgnupgmainwin.cpp:255
+#, kde-format
+msgid "Could not save file %1: %2"
+msgstr ""
+
+#. i18n: ectx: Menu (file)
+#: kwatchgnupgui.rc:4
+#, kde-format
+msgid "&File"
+msgstr ""
+
+#. i18n: ectx: ToolBar (mainToolBar)
+#: kwatchgnupgui.rc:13
+#, kde-format
+msgid "Main Toolbar"
+msgstr ""
+
+#: tray.cpp:29
+#, kde-format
+msgid "KWatchGnuPG Log Viewer"
+msgstr "KWatchGnuPG egunkari ikustailea"
+
+#~ msgid ""
+#~ "The file named \"%1\" already exists. Are you sure you want to overwrite "
+#~ "it?"
+#~ msgstr ""
+#~ "\"%1\" fitxategia dagoeneko existitzen da. Ziur zaude gainidatzi nahi "
+#~ "duzula?"
+
+#~ msgid "Overwrite File"
+#~ msgstr "Gainidatzi fitxategia"

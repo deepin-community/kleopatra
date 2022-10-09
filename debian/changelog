@@ -1,0 +1,352 @@
+kleopatra (4:21.08.1-2) unstable; urgency=medium
+
+  [ Norbert Preining ]
+  * Fix unsafe creation of GPGHOME directory (Closes: #993441).
+
+ -- Norbert Preining <norbert@preining.info>  Mon, 27 Sep 2021 15:36:53 +0900
+
+kleopatra (4:21.08.1-1) unstable; urgency=medium
+
+  [ Norbert Preining ]
+  * New upstream release (21.08.1).
+  * Bump Standards-Version to 4.6.0, no change required.
+
+ -- Norbert Preining <norbert@preining.info>  Sat, 11 Sep 2021 07:22:21 +0900
+
+kleopatra (4:21.08.0-1) unstable; urgency=medium
+
+  [ Norbert Preining ]
+  * New upstream release (21.08.0).
+  * Update patch.
+
+ -- Norbert Preining <norbert@preining.info>  Tue, 17 Aug 2021 12:46:44 +0900
+
+kleopatra (4:21.04.3-1) experimental; urgency=medium
+
+  [ Norbert Preining ]
+  * New upstream release (21.04.3).
+
+ -- Norbert Preining <norbert@preining.info>  Fri, 09 Jul 2021 10:35:57 +0900
+
+kleopatra (4:21.04.1-1) experimental; urgency=medium
+
+  [ Norbert Preining ]
+  * New upstream release (21.04.1).
+
+ -- Norbert Preining <norbert@preining.info>  Fri, 14 May 2021 06:11:24 +0900
+
+kleopatra (4:21.04.0-1) experimental; urgency=medium
+
+  [ Norbert Preining ]
+  * New upstream release (21.04.0).
+  * Borrow minimal upstream signing key from k3b.
+  * Drop Kubuntu from maintainer name.
+  * Removed Maximiliano Curia from the uploaders, thanks for your work
+    on the package!
+  * Added myself to the uploaders.
+
+ -- Norbert Preining <norbert@preining.info>  Thu, 13 May 2021 09:46:26 +0900
+
+kleopatra (4:20.08.3-1) unstable; urgency=medium
+
+  [ Sandro Knauß ]
+  * Bump Standards-Version to 4.5.1 (No changes needed).
+  * New upstream release (20.08.3).
+  * Update build-deps and deps with the info from cmake.
+  * Minimize the upstream GPG signing key.
+
+ -- Sandro Knauß <hefee@debian.org>  Wed, 16 Dec 2020 01:44:19 +0100
+
+kleopatra (4:20.08.2-2) unstable; urgency=medium
+
+  * Team upload to unstable.
+
+ -- Sandro Knauß <hefee@debian.org>  Tue, 20 Oct 2020 00:08:29 +0200
+
+kleopatra (4:20.08.2-1) experimental; urgency=medium
+
+  [ Sandro Knauß ]
+  * New upstream release (20.08.2).
+  * Update build-deps and deps with the info from cmake.
+  * Update Homepage link to point to new invent.kde.org
+  * Update field Source in debian/copyright to invent.kde.org move.
+  * Update repository related entries to metadata file.
+  * Add Bug-* entries to metadata file.
+  * Fix copyright information for appdata.xml.
+
+ -- Sandro Knauß <hefee@debian.org>  Fri, 16 Oct 2020 00:52:48 +0200
+
+kleopatra (4:20.04.1-2) unstable; urgency=medium
+
+  * Team upload.
+  * Explicitly add the gettext build dependency.
+  * Switch from dhmk to the dh sequencer:
+    - invoke the dh sequencer using the kf5 addon
+    - call the right debhelper command instead of $(overridden_command)
+  * Unregister the old /etc/xdg/kleopatra.categories, and
+    /etc/xdg/kleopatra.renamecategories conffiles.
+
+ -- Pino Toscano <pino@debian.org>  Sat, 22 Aug 2020 23:46:00 +0200
+
+kleopatra (4:20.04.1-1) unstable; urgency=medium
+
+  [ Sandro Knauß ]
+  * New upstream release (20.04.1).
+  * Update build-deps and deps with the info from cmake.
+
+ -- Sandro Knauß <hefee@debian.org>  Wed, 27 May 2020 00:00:10 +0200
+
+kleopatra (4:20.04.0-1) experimental; urgency=medium
+
+  [ Sandro Knauß ]
+  * Update watch file to the new release-service location.
+  * Bump compat level to 13.
+  * Bump Standards-Version to 4.5.0 (No changes needed).
+  * Add Rules-Requires-Root field to control.
+  * New upstream release (19.12.3).
+  * Update build-deps and deps with the info from cmake.
+  * New upstream release (20.04.0).
+  * Enable hardening all.
+  * Cleanup copyright file.
+  * Set fields Upstream-Name, Upstream-Contact in debian/copyright.
+  * Remove unused license definitions for LGPL-2+3.
+  * Remove obsolete fields Contact, Name from debian/upstream/metadata
+    (already present in machine-readable debian/copyright).
+
+ -- Sandro Knauß <hefee@debian.org>  Wed, 13 May 2020 12:22:45 +0200
+
+kleopatra (4:19.08.3-1) unstable; urgency=medium
+
+  [ Sandro Knauß ]
+  * New upstream release (19.08.3).
+  * Update build-deps and deps with the info from cmake.
+
+ -- Sandro Knauß <hefee@debian.org>  Sat, 30 Nov 2019 22:55:07 +0100
+
+kleopatra (4:19.08.2-1) experimental; urgency=medium
+
+  [ Sandro Knauß ]
+  * New upstream release (19.08.2).
+  * Update build-deps and deps with the info from cmake.
+  * Remove breaks against kde-l10n packages.
+
+ -- Sandro Knauß <hefee@debian.org>  Fri, 08 Nov 2019 10:39:41 +0100
+
+kleopatra (4:18.08.3-3) unstable; urgency=medium
+
+  * Release to unstable.
+
+ -- Sandro Knauß <hefee@debian.org>  Thu, 14 Nov 2019 23:49:56 +0100
+
+kleopatra (4:18.08.3-2) experimental; urgency=medium
+
+  [ Sandro Knauß ]
+  * Bump Standards-Version to 4.4.1 (No changes needed).
+  * Bump compat level to 12.
+  * Add myself to Uploaders.
+  * Enforce depdendencies between KDEPIM packages to enable bundling.
+  * Delete not needed Breaks/Confilcts.
+
+ -- Sandro Knauß <hefee@debian.org>  Sat, 05 Oct 2019 00:56:21 +0200
+
+kleopatra (4:18.08.3-1) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * New upstream release (18.08.3).
+  * Update build-deps and deps with the info from cmake.
+  * Bump Standards-Version to 4.3.0 (No changes needed).
+  * Removed acc autopkgtest.
+  * Removed testsuite autopkgtest.
+
+ -- Sandro Knauß <hefee@debian.org>  Mon, 04 Feb 2019 15:59:37 +0100
+
+kleopatra (4:18.08.1-1) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * Bump Standards-Version to 4.2.1 (No changes needed).
+  * Follow stable releases in KDE again.
+  * New upstream release (18.08.1).
+  * Update build-deps and deps with the info from cmake.
+
+ -- Sandro Knauß <hefee@debian.org>  Tue, 02 Oct 2018 23:18:40 +0200
+
+kleopatra (4:18.07.90-1) experimental; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * Update watch file to match unstable releases, too.
+  * New upstream release (18.07.90).
+  * Bump Standards-Version to 4.2.0 (No changes needed).
+  * Update build-deps and deps with the info from cmake.
+  * Update copyright file for new upstream.
+
+ -- Sandro Knauß <hefee@debian.org>  Sat, 18 Aug 2018 11:18:58 +0200
+
+kleopatra (4:17.12.3-1) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * New upstream release (17.12.3).
+  * Update build-deps and deps with the info from cmake.
+  * use secure copyright format uri.
+  * small fixes in copyright file.
+
+ -- Sandro Knauß <hefee@debian.org>  Sat, 31 Mar 2018 18:25:16 +0200
+
+kleopatra (4:17.12.2-1) experimental; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * New upstream release (17.12.2).
+  * Update Vcs links to salsa.
+  * Update build-deps and deps with the info from cmake
+  * Update copyright file.
+  * Enable build tests (make them non-failing).
+  * Bump debhelper build-dep and compat to 11.
+
+ -- Sandro Knauß <hefee@debian.org>  Fri, 09 Mar 2018 15:14:29 +0100
+
+kleopatra (4:17.08.3-2) unstable; urgency=medium
+
+  * Team upload.
+  * Switch the deprecated gnupg2 dependency to gnupg, and drop gnupg-agent.
+    (Closes: #885148)
+  * Simplify watch file, and switch it to https.
+  * Stop forcing debian/tmp as local installation directory, installing
+    everything to the final location
+    - drop kleopatra.install, no more useful now
+    - make sure to not ship development symlinks
+  * Update lintian overrides.
+  * Bump Standards-Version to 4.1.3, no changes required.
+
+ -- Pino Toscano <pino@debian.org>  Sat, 20 Jan 2018 10:34:18 +0100
+
+kleopatra (4:17.08.3-1) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Sandro Knauß ]
+  * New upstream release (17.08.3).
+  * Bump Standards-Version to 4.1.2 (No changes needed).
+  * Get rid of unnessary break/replaces of kde-l10n-(ast|eo).
+  * Bump debhelper build-dep and compat to 10.
+  * Set l10npkgs_firstversion_ok to 4:16.04.3-9~
+
+ -- Sandro Knauß <hefee@debian.org>  Thu, 21 Dec 2017 17:55:41 +0100
+
+kleopatra (4:17.08.0-1) experimental; urgency=medium
+
+  * New upstream release (17.08.0)
+  * Release to experimental
+
+ -- Maximiliano Curia <maxy@debian.org>  Fri, 01 Sep 2017 22:20:35 +0200
+
+kleopatra (4:17.08.0-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Thu, 17 Aug 2017 09:37:26 +0000
+
+kleopatra (4:17.04.3-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 12 Jul 2017 10:21:42 +0000
+
+kleopatra (4:17.04.2-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 07 Jun 2017 12:22:08 +0000
+
+kleopatra (4:17.04.1-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Thu, 11 May 2017 18:19:22 +0000
+
+kleopatra (4:17.04.0-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 19 Apr 2017 13:04:38 +0000
+
+kleopatra (4:16.12.3-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 08 Mar 2017 13:48:42 +0000
+
+kleopatra (4:16.12.2-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 08 Feb 2017 16:59:06 +0000
+
+kleopatra (4:16.12.1-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 11 Jan 2017 13:20:09 +0000
+
+kleopatra (4:16.12.0-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 14 Dec 2016 16:28:46 +0000
+
+kleopatra (4:16.08.3-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Mon, 21 Nov 2016 13:53:28 +0000
+
+kleopatra (4:16.08.2-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Fri, 14 Oct 2016 13:39:53 +0000
+
+kleopatra (4:16.08.1-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Fri, 16 Sep 2016 13:06:56 +0000
+
+kleopatra (4:16.08.0-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 17 Aug 2016 11:48:58 +0000
+
+kleopatra (4:16.04.3-0neon) xenial; urgency=medium
+
+  * New release
+
+ -- Neon CI <neon@kde.org>  Wed, 03 Aug 2016 12:51:13 +0000
+
+kleopatra (4:16.04.2-2) unstable; urgency=medium
+
+  * Release to unstable.
+
+ -- Maximiliano Curia <maxy@debian.org>  Tue, 05 Jul 2016 13:56:38 +0200
+
+kleopatra (4:16.04.2-1) experimental; urgency=medium
+
+  * New upstream release.
+
+ -- Maximiliano Curia <maxy@debian.org>  Tue, 28 Jun 2016 08:55:24 +0200
+
+kleopatra (4:16.04.0-1) experimental; urgency=medium
+
+  * Initial release.
+  * Add missing breaks/replaces
+
+ -- Maximiliano Curia <maxy@debian.org>  Tue, 31 May 2016 10:58:45 +0200
