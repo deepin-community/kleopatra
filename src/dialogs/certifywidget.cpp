@@ -11,6 +11,10 @@
 
 #include "certifywidget.h"
 
+#include <utils/accessibility.h>
+#include <utils/keys.h>
+#include "view/infofield.h"
+
 #include "kleopatra_debug.h"
 
 #include <KLocalizedString>
@@ -21,6 +25,7 @@
 #include <KSeparator>
 #include <KSharedConfig>
 
+#include <Libkleo/Algorithm>
 #include <Libkleo/DefaultKeyFilter>
 #include <Libkleo/KeySelectionCombo>
 #include <Libkleo/Formatting>
@@ -48,12 +53,12 @@
 
 #include <gpgme++/key.h>
 
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E00 // 1.14.0
-# define GPGME_HAS_REMARKS
-#endif
-
 using namespace Kleo;
+
+static QDebug operator<<(QDebug s, const GpgME::UserID &userID)
+{
+    return s << Formatting::prettyUserID(userID);
+}
 
 namespace {
 
@@ -63,7 +68,8 @@ class AnimatedExpander: public QWidget
 {
     Q_OBJECT
 public:
-    explicit AnimatedExpander(const QString &title = QString(),
+    explicit AnimatedExpander(const QString &title,
+                              const QString &accessibleTitle = {},
                               QWidget *parent = nullptr);
     void setContentLayout(QLayout *contentLayout);
 
@@ -72,17 +78,28 @@ private:
     QToolButton toggleButton;
     QFrame headerLine;
     QParallelAnimationGroup toggleAnimation;
-    QScrollArea contentArea;
+    QWidget contentArea;
     int animationDuration{300};
 };
 
-AnimatedExpander::AnimatedExpander(const QString &title, QWidget *parent):
-    QWidget(parent)
+AnimatedExpander::AnimatedExpander(const QString &title, const QString &accessibleTitle, QWidget *parent)
+    : QWidget{parent}
 {
+#ifdef Q_OS_WIN
+    // draw dotted focus frame if button has focus; otherwise, draw invisible frame using background color
+    toggleButton.setStyleSheet(QStringLiteral("QToolButton { border: 1px solid palette(window); }"
+                                              "QToolButton:focus { border: 1px dotted palette(window-text); }"));
+#else
+    // this works with Breeze style because Breeze draws the focus frame when drawing CE_ToolButtonLabel
+    // while the Windows styles (and Qt's common base style) draw the focus frame before drawing CE_ToolButtonLabel
     toggleButton.setStyleSheet(QStringLiteral("QToolButton { border: none; }"));
+#endif
     toggleButton.setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     toggleButton.setArrowType(Qt::ArrowType::RightArrow);
     toggleButton.setText(title);
+    if (!accessibleTitle.isEmpty()) {
+        toggleButton.setAccessibleName(accessibleTitle);
+    }
     toggleButton.setCheckable(true);
     toggleButton.setChecked(false);
 
@@ -90,12 +107,12 @@ AnimatedExpander::AnimatedExpander(const QString &title, QWidget *parent):
     headerLine.setFrameShadow(QFrame::Sunken);
     headerLine.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
-    contentArea.setStyleSheet(QStringLiteral("QScrollArea { border: none; }"));
     contentArea.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     // start out collapsed
     contentArea.setMaximumHeight(0);
     contentArea.setMinimumHeight(0);
+    contentArea.setVisible(false);
 
     // let the entire widget grow and shrink with its content
     toggleAnimation.addAnimation(new QPropertyAnimation(this, "minimumHeight"));
@@ -110,9 +127,19 @@ AnimatedExpander::AnimatedExpander(const QString &title, QWidget *parent):
     mainLayout.addWidget(&contentArea, row, 0, 1, 3);
     setLayout(&mainLayout);
     QObject::connect(&toggleButton, &QToolButton::clicked, [this](const bool checked) {
+        if (checked) {
+            // make the content visible when expanding starts
+            contentArea.setVisible(true);
+        }
         toggleButton.setArrowType(checked ? Qt::ArrowType::DownArrow : Qt::ArrowType::RightArrow);
         toggleAnimation.setDirection(checked ? QAbstractAnimation::Forward : QAbstractAnimation::Backward);
         toggleAnimation.start();
+    });
+    connect(&toggleAnimation, &QAbstractAnimation::finished, [this]() {
+        // hide the content area when it is fully collapsed
+        if (!toggleButton.isChecked()) {
+            contentArea.setVisible(false);
+        }
     });
 }
 
@@ -166,12 +193,28 @@ private:
     GpgME::Key mExcludedKey;
 };
 
+class UserIDItem : public QStandardItem
+{
+public:
+    explicit UserIDItem(const GpgME::UserID &uid)
+        : mUserId{uid}
+    {}
+
+    GpgME::UserID userId()
+    {
+        return mUserId;
+    }
+
+private:
+    GpgME::UserID mUserId;
+};
+
 class UserIDModel : public QStandardItemModel
 {
     Q_OBJECT
 public:
     enum Role {
-        UserIDIndex = Qt::UserRole
+        UserID = Qt::UserRole
     };
     explicit UserIDModel(QObject *parent = nullptr) : QStandardItemModel(parent) {}
 
@@ -187,14 +230,13 @@ public:
         const std::vector<GpgME::UserID> ids = key.userIDs();
         int i = 0;
         for (const auto &uid: key.userIDs()) {
-            if (uid.isRevoked() || uid.isInvalid()) {
-                // Skip user ID's that cannot really be certified.
+            if (uid.isRevoked() || uid.isInvalid() || Kleo::isRevokedOrExpired(uid)) {
+                // Skip user IDs that cannot really be certified.
                 i++;
                 continue;
             }
-            auto const item = new QStandardItem;
+            const auto item = new UserIDItem{uid};
             item->setText(Formatting::prettyUserID(uid));
-            item->setData(i, UserIDIndex);
             item->setCheckable(true);
             item->setEditable(false);
             item->setCheckState(Qt::Checked);
@@ -203,37 +245,41 @@ public:
         }
     }
 
-    void setCheckedUserIDs(const std::vector<unsigned int> &uids)
+    void setCheckedUserIDs(const std::vector<GpgME::UserID> &uids)
     {
-        std::vector<unsigned int> sorted = uids;
-        std::sort(sorted.begin(), sorted.end());
         for (int i = 0, end = rowCount(); i != end; ++i) {
-            item(i)->setCheckState(std::binary_search(sorted.begin(), sorted.end(), i) ? Qt::Checked : Qt::Unchecked);
+            const auto uidItem = userIdItem(i);
+            const auto itemUserId = uidItem->userId();
+            const bool userIdIsInList = Kleo::any_of(uids, [itemUserId](const auto &uid) {
+                return Kleo::userIDsAreEqual(itemUserId, uid);
+            });
+            uidItem->setCheckState(userIdIsInList ? Qt::Checked : Qt::Unchecked);
         }
     }
 
-    std::vector<unsigned int> checkedUserIDs() const
+    std::vector<GpgME::UserID> checkedUserIDs() const
     {
-        std::vector<unsigned int> ids;
+        std::vector<GpgME::UserID> userIds;
+        userIds.reserve(rowCount());
         for (int i = 0; i < rowCount(); ++i) {
-            if (item(i)->checkState() == Qt::Checked) {
-                ids.push_back(item(i)->data(UserIDIndex).toUInt());
+            const auto uidItem = userIdItem(i);
+            if (uidItem->checkState() == Qt::Checked) {
+                userIds.push_back(uidItem->userId());
             }
         }
-        qCDebug(KLEOPATRA_LOG) << "Checked uids are: " << ids;
-        return ids;
+        qCDebug(KLEOPATRA_LOG) << "Checked user IDs:" << userIds;
+        return userIds;
+    }
+
+private:
+    UserIDItem *userIdItem(int row) const
+    {
+        return static_cast<UserIDItem *>(item(row));
     }
 
 private:
     GpgME::Key m_key;
 };
-
-static bool uidEqual(const GpgME::UserID &lhs, const GpgME::UserID &rhs)
-{
-    return qstrcmp(lhs.parent().primaryFingerprint(),
-                    rhs.parent().primaryFingerprint()) == 0
-            && qstrcmp(lhs.id(), rhs.id()) == 0;
-}
 
 auto checkBoxSize(const QCheckBox *checkBox)
 {
@@ -248,14 +294,13 @@ auto createInfoButton(const QString &text, QWidget *parent)
     infoBtn->setFlat(true);
 
     QObject::connect(infoBtn, &QPushButton::clicked, infoBtn, [infoBtn, text] () {
-        QToolTip::showText(infoBtn->mapToGlobal(QPoint()) + QPoint(infoBtn->width(), 0),
-                           text, infoBtn, QRect(), 30000);
+        const auto pos = infoBtn->mapToGlobal(QPoint()) + QPoint(infoBtn->width(), 0);
+        showToolTip(pos, text, infoBtn);
     });
 
     return infoBtn;
 }
 
-#ifdef QGPGME_SUPPORTS_SIGNATURE_EXPIRATION
 QString dateFormatWithFourDigitYear(QLocale::FormatType format)
 {
     // Force the year to be formatted as four digit number, so that
@@ -269,7 +314,32 @@ QString formatDate(const QDate &date, QLocale::FormatType format)
 {
     return QLocale{}.toString(date, dateFormatWithFourDigitYear(format));
 }
-#endif
+
+class ListView : public QListView
+{
+    Q_OBJECT
+public:
+    using QListView::QListView;
+
+protected:
+    void focusInEvent(QFocusEvent *event) override
+    {
+        QListView::focusInEvent(event);
+        // queue the invokation, so that it happens after the widget itself got focus
+        QMetaObject::invokeMethod(this, &ListView::forceAccessibleFocusEventForCurrentItem, Qt::QueuedConnection);
+    }
+
+private:
+    void forceAccessibleFocusEventForCurrentItem()
+    {
+        // force Qt to send a focus event for the current item to accessibility
+        // tools; otherwise, the user has no idea which item is selected when the
+        // list gets keyboard input focus
+        const auto current = currentIndex();
+        setCurrentIndex({});
+        setCurrentIndex(current);
+    }
+};
 
 }
 
@@ -278,35 +348,47 @@ class CertifyWidget::Private
 public:
     Private(CertifyWidget *qq)
         : q{qq}
-        , mFprLabel{new QLabel{q}}
-        , mSecKeySelect{new KeySelectionCombo{/* secretOnly= */true, q}}
-        , mMissingOwnerTrustInfo{new KMessageWidget{q}}
-        , mExportCB{new QCheckBox{q}}
-        , mPublishCB{new QCheckBox{q}}
-        , mTagsLE{new QLineEdit{q}}
-        , mTrustSignatureCB{new QCheckBox{q}}
-        , mTrustSignatureDomainLE{new QLineEdit{q}}
-        , mExpirationCheckBox{new QCheckBox{q}}
-        , mExpirationDateEdit{new KDateComboBox{q}}
-        , mSetOwnerTrustAction{new QAction{q}}
     {
         auto mainLay = new QVBoxLayout{q};
-        mainLay->addWidget(mFprLabel);
 
-        auto secKeyLay = new QHBoxLayout{q};
-        secKeyLay->addWidget(new QLabel(i18n("Certify with:")));
+        {
+            auto label = new QLabel{i18n("Verify the fingerprint, mark the user IDs you want to certify, "
+                "and select the key you want to certify the user IDs with.<br>"
+                "<i>Note: Only the fingerprint clearly identifies the key and its owner.</i>"), q};
+            label->setWordWrap(true);
+            labelHelper.addLabel(label);
+            mainLay->addWidget(label);
+        }
 
-        mSecKeySelect->setKeyFilter(std::make_shared<SecKeyFilter>());
+        mainLay->addWidget(new KSeparator{Qt::Horizontal, q});
 
-        secKeyLay->addWidget(mSecKeySelect, 1);
-        mainLay->addLayout(secKeyLay);
+        {
+            auto grid = new QGridLayout;
+            grid->setColumnStretch(1, 1);
+            int row = -1;
 
+            row++;
+            mFprField = std::make_unique<InfoField>(i18n("Fingerprint:"), q);
+            grid->addWidget(mFprField->label(), row, 0);
+            grid->addLayout(mFprField->layout(), row, 1);
+
+            row++;
+            auto label = new QLabel{i18n("Certify with:"), q};
+            mSecKeySelect = new KeySelectionCombo{/* secretOnly= */true, q};
+            mSecKeySelect->setKeyFilter(std::make_shared<SecKeyFilter>());
+            label->setBuddy(mSecKeySelect);
+            grid->addWidget(label, row, 0);
+            grid->addWidget(mSecKeySelect);
+
+            mainLay->addLayout(grid);
+        }
+
+        mMissingOwnerTrustInfo = new KMessageWidget{q};
+        mSetOwnerTrustAction = new QAction{q};
         mSetOwnerTrustAction->setText(i18nc("@action:button", "Set Owner Trust"));
-        mSetOwnerTrustAction->setToolTip(QLatin1String("<html>") +
-                                         i18nc("@info:tooltip",
+        mSetOwnerTrustAction->setToolTip(i18nc("@info:tooltip",
                                                "Click to set the trust level of the selected certification key to ultimate trust. "
-                                               "This is what you usually want to do for your own keys.") +
-                                         QLatin1String("</html>"));
+                                               "This is what you usually want to do for your own keys."));
         connect(mSetOwnerTrustAction, &QAction::triggered, q, [this] () { setOwnerTrust(); });
         mMissingOwnerTrustInfo->addAction(mSetOwnerTrustAction);
         mMissingOwnerTrustInfo->setVisible(false);
@@ -315,22 +397,25 @@ public:
 
         mainLay->addWidget(new KSeparator{Qt::Horizontal, q});
 
-        auto listView = new QListView{q};
-        listView->setModel(&mUserIDModel);
-        mainLay->addWidget(listView, 1);
+        userIdListView = new ListView{q};
+        userIdListView->setAccessibleName(i18n("User IDs"));
+        userIdListView->setModel(&mUserIDModel);
+        mainLay->addWidget(userIdListView, 1);
 
         // Setup the advanced area
-        auto expander = new AnimatedExpander{i18n("Advanced"), q};
+        auto expander = new AnimatedExpander{i18n("Advanced"), i18n("Show advanced options"), q};
         mainLay->addWidget(expander);
 
-        auto advLay = new QVBoxLayout{q};
+        auto advLay = new QVBoxLayout;
 
+        mExportCB = new QCheckBox{q};
         mExportCB->setText(i18n("Certify for everyone to see (exportable)"));
         advLay->addWidget(mExportCB);
 
         {
-            auto layout = new QHBoxLayout{q};
+            auto layout = new QHBoxLayout;
 
+            mPublishCB = new QCheckBox{q};
             mPublishCB->setText(i18n("Publish on keyserver afterwards"));
             mPublishCB->setEnabled(mExportCB->isChecked());
 
@@ -340,39 +425,37 @@ public:
             advLay->addLayout(layout);
         }
 
-#ifndef GPGME_HAS_REMARKS
-        mTagsLE->setVisible(false);
-#else
         {
-            auto tagsLay = new QHBoxLayout{q};
+            auto tagsLay = new QHBoxLayout;
 
-            mTagsLE->setPlaceholderText(i18n("Tags"));
+            auto label = new QLabel{i18n("Tags:"), q};
+            mTagsLE = new QLineEdit{q};
+            label->setBuddy(mTagsLE);
+
             auto infoBtn = createInfoButton(i18n("You can use this to add additional info to a certification.") +
                                             QStringLiteral("<br/><br/>") +
                                             i18n("Tags created by anyone with full certification trust "
                                                 "are shown in the keylist and can be searched."),
                                             q);
+            infoBtn->setAccessibleName(i18n("Explain tags"));
 
-            tagsLay->addWidget(new QLabel{i18n("Tags:"), q});
+            tagsLay->addWidget(label);
             tagsLay->addWidget(mTagsLE, 1);
             tagsLay->addWidget(infoBtn);
 
             advLay->addLayout(tagsLay);
         }
-#endif
 
-#ifndef QGPGME_SUPPORTS_SIGNATURE_EXPIRATION
-        mExpirationCheckBox->setVisible(false);
-        mExpirationDateEdit->setVisible(false);
-#else
         {
-            auto layout = new QHBoxLayout{q};
+            auto layout = new QHBoxLayout;
 
+            mExpirationCheckBox = new QCheckBox{q};
             mExpirationCheckBox->setText(i18n("Expiration:"));
 
+            mExpirationDateEdit = new KDateComboBox{q};
             mExpirationDateEdit->setOptions(KDateComboBox::EditDate | KDateComboBox::SelectDate | KDateComboBox::DatePicker |
                                             KDateComboBox::DateKeywords | KDateComboBox::WarnOnInvalid);
-            static const QDate maxAllowedDate{2106, 2, 6};
+            static const QDate maxAllowedDate{2106, 2, 5};
             const QDate today = QDate::currentDate();
             mExpirationDateEdit->setDateRange(today.addDays(1), maxAllowedDate,
                                               i18n("The certification must be valid at least until tomorrow."),
@@ -391,6 +474,7 @@ public:
                                                  "your certification to a certain amount of time. Once the expiration "
                                                  "date has passed, your certification is no longer valid."),
                                             q);
+            infoBtn->setAccessibleName(i18n("Explain expiration"));
 
             layout->addWidget(mExpirationCheckBox);
             layout->addWidget(mExpirationDateEdit, 1);
@@ -398,15 +482,11 @@ public:
 
             advLay->addLayout(layout);
         }
-#endif
 
-#ifndef QGPGME_SUPPORTS_TRUST_SIGNATURES
-        mTrustSignatureCB->setVisible(false);
-        mTrustSignatureDomainLE->setVisible(false);
-#else
         {
-            auto layout = new QHBoxLayout{q};
+            auto layout = new QHBoxLayout;
 
+            mTrustSignatureCB = new QCheckBox{q};
             mTrustSignatureCB->setText(i18n("Certify as trusted introducer"));
             auto infoBtn = createInfoButton(i18n("You can use this to certify a trusted introducer for a domain.") +
                                             QStringLiteral("<br/><br/>") +
@@ -415,6 +495,7 @@ public:
                                                  "as certified, i.e. a trusted introducer acts as a kind of "
                                                  "intermediate CA for a domain."),
                                             q);
+            infoBtn->setAccessibleName(i18n("Explain trusted introducer"));
 
             layout->addWidget(mTrustSignatureCB, 1);
             layout->addWidget(infoBtn);
@@ -422,30 +503,33 @@ public:
             advLay->addLayout(layout);
         }
         {
-            auto layout = new QHBoxLayout{q};
+            auto layout = new QHBoxLayout;
 
-            mTrustSignatureDomainLE->setPlaceholderText(i18n("Domain"));
+            auto label = new QLabel{i18n("Domain:"), q};
+
+            mTrustSignatureDomainLE = new QLineEdit{q};
             mTrustSignatureDomainLE->setEnabled(mTrustSignatureCB->isChecked());
+            label->setBuddy(mTrustSignatureDomainLE);
 
             layout->addSpacing(checkBoxSize(mTrustSignatureCB).width());
+            layout->addWidget(label);
             layout->addWidget(mTrustSignatureDomainLE);
 
             advLay->addLayout(layout);
         }
-#endif
 
         expander->setContentLayout(advLay);
 
-        connect(&mUserIDModel, &QStandardItemModel::itemChanged, q, &CertifyWidget::changed);
+        connect(&mUserIDModel, &QStandardItemModel::itemChanged, q, [this](QStandardItem *item) {
+            onItemChanged(item);
+        });
 
         connect(mExportCB, &QCheckBox::toggled, [this] (bool on) {
             mPublishCB->setEnabled(on);
         });
 
         connect(mSecKeySelect, &KeySelectionCombo::currentKeyChanged, [this] (const GpgME::Key &) {
-#ifdef GPGME_HAS_REMARKS
             updateTags();
-#endif
             checkOwnerTrust();
             Q_EMIT q->changed();
         });
@@ -480,7 +564,6 @@ public:
         if (mTagsLE->isModified()) {
             return;
         }
-#ifdef GPGME_HAS_REMARKS
         GpgME::Key remarkKey = mSecKeySelect->currentKey();
 
         if (!remarkKey.isNull()) {
@@ -492,20 +575,19 @@ public:
                 if (c_remark) {
                     const QString candidate = QString::fromUtf8(c_remark);
                     if (candidate != remark) {
-                        qCDebug(KLEOPATRA_LOG) << "Different remarks on user ids. Taking last.";
+                        qCDebug(KLEOPATRA_LOG) << "Different remarks on user IDs. Taking last.";
                         remark = candidate;
                         uidsWithRemark.clear();
                     }
                     uidsWithRemark.push_back(uid);
                 }
             }
-            // Only select the user ids with the correct remark
+            // Only select the user IDs with the correct remark
             if (!remark.isEmpty()) {
                 selectUserIDs(uidsWithRemark);
             }
             mTagsLE->setText(remark);
         }
-#endif
     }
 
     void updateTrustSignatureDomain()
@@ -523,9 +605,8 @@ public:
 
     void setTarget(const GpgME::Key &key)
     {
-        mFprLabel->setText(i18n("Fingerprint: <b>%1</b>",
-                            Formatting::prettyID(key.primaryFingerprint())) + QStringLiteral("<br/>") +
-                            i18n("<i>Only the fingerprint clearly identifies the key and its owner.</i>"));
+        mFprField->setValue(QStringLiteral("<b>") + Formatting::prettyID(key.primaryFingerprint()) + QStringLiteral("</b>"),
+                            Formatting::accessibleHexID(key.primaryFingerprint()));
         mUserIDModel.setKey(key);
         mTarget = key;
 
@@ -544,24 +625,10 @@ public:
 
     void selectUserIDs(const std::vector<GpgME::UserID> &uids)
     {
-        const auto all = mTarget.userIDs();
-
-        std::vector<unsigned int> indexes;
-        indexes.reserve(uids.size());
-
-        for (const auto &uid: uids) {
-            const unsigned int idx =
-                std::distance(all.cbegin(), std::find_if(all.cbegin(), all.cend(),
-                            [uid](const GpgME::UserID &other) { return uidEqual(uid, other); }));
-            if (idx < all.size()) {
-                indexes.push_back(idx);
-            }
-        }
-
-        mUserIDModel.setCheckedUserIDs(indexes);
+        mUserIDModel.setCheckedUserIDs(uids);
     }
 
-    std::vector<unsigned int> selectedUserIDs() const
+    std::vector<GpgME::UserID> selectedUserIDs() const
     {
         return mUserIDModel.checkedUserIDs();
     }
@@ -595,7 +662,7 @@ public:
         if (mTarget.isNull() || mSecKeySelect->currentKey().isNull()) {
             return false;
         }
-        // do not accept empty list of user ids
+        // do not accept empty list of user IDs
         if (selectedUserIDs().empty()) {
             return false;
         }
@@ -633,7 +700,7 @@ public:
         QGpgME::ChangeOwnerTrustJob *const j = QGpgME::openpgp()->changeOwnerTrustJob();
         connect(j, &QGpgME::ChangeOwnerTrustJob::result, q, [this] (const GpgME::Error &err) {
             if (err) {
-                KMessageBox::sorry(q,
+                KMessageBox::error(q,
                                    i18n("<p>Changing the certification trust of the key <b>%1</b> failed:</p><p>%2</p>",
                                         Formatting::formatForComboBox(secKey()),
                                         QString::fromLocal8Bit(err.asString())),
@@ -650,11 +717,28 @@ public:
         j->start(secKey(), GpgME::Key::Ultimate);
     }
 
+    void onItemChanged(QStandardItem *item)
+    {
+        Q_EMIT q->changed();
+
+#ifndef QT_NO_ACCESSIBILITY
+        if (item) {
+            // assume that the checked state changed
+            QAccessible::State st;
+            st.checked = true;
+            QAccessibleStateChangeEvent e(userIdListView, st);
+            e.setChild(item->index().row());
+            QAccessible::updateAccessibility(&e);
+        }
+#endif
+    }
+
 public:
     CertifyWidget *const q;
-    QLabel *mFprLabel = nullptr;
+    std::unique_ptr<InfoField> mFprField;
     KeySelectionCombo *mSecKeySelect = nullptr;
     KMessageWidget *mMissingOwnerTrustInfo = nullptr;
+    ListView *userIdListView = nullptr;
     QCheckBox *mExportCB = nullptr;
     QCheckBox *mPublishCB = nullptr;
     QLineEdit *mTagsLE = nullptr;
@@ -663,6 +747,8 @@ public:
     QCheckBox *mExpirationCheckBox = nullptr;
     KDateComboBox *mExpirationDateEdit = nullptr;
     QAction *mSetOwnerTrustAction = nullptr;
+
+    LabelHelper labelHelper;
 
     UserIDModel mUserIDModel;
     GpgME::Key mTarget;
@@ -691,7 +777,7 @@ void CertifyWidget::selectUserIDs(const std::vector<GpgME::UserID> &uids)
     d->selectUserIDs(uids);
 }
 
-std::vector<unsigned int> CertifyWidget::selectedUserIDs() const
+std::vector<GpgME::UserID> CertifyWidget::selectedUserIDs() const
 {
     return d->selectedUserIDs();
 }

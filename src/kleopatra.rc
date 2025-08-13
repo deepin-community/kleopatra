@@ -1,9 +1,10 @@
 <!DOCTYPE gui >
-<gui name="kleopatra" version="503" >
+<gui name="kleopatra" version="511" >
     <MenuBar>
         <Menu name="file">
             <text>&amp;File</text>
             <Action name="file_new_certificate"/>
+            <Action name="file_new_certificate_signing_request"/>
             <Separator/>
             <Action name="file_lookup_certificates"/>
             <Action name="file_import_certificates"/>
@@ -12,6 +13,7 @@
             <Action name="file_export_secret_keys"/>
             <Action name="file_export_paper_key"/>
             <Action name="file_export_certificates_to_server"/>
+            <Action name="file_export_certificate_to_provider"/>
             <Separator/>
             <Action name="file_decrypt_verify_files"/>
             <Action name="file_sign_encrypt_files"/>
@@ -51,6 +53,7 @@
             <Action name="certificates_change_passphrase"/>
             <Action name="certificates_add_userid"/>
             <Separator/>
+            <Action name="certificates_revoke"/>
             <Action name="certificates_delete"/>
         </Menu>
         <Menu name="tools">
@@ -67,7 +70,7 @@
             <Action name="crl_clear_crl_cache"/>
             <Action name="crl_dump_crl_cache"/>
             <Separator/>
-            <Action name="configure_backend"/>
+            <Action name="tools_restart_backend"/>
         </Menu>
         <Menu name="settings">
             <text>&amp;Settings</text>
@@ -87,7 +90,13 @@
         </Menu>
         <Menu name="help">
             <text>&amp;Help</text>
-            <Action name="help_show_compendium"/>
+            <Action name="help_doc_quickguide"/>
+            <Action name="help_doc_compendium"/>
+            <Action name="help_doc_symenc"/>
+            <Action name="help_doc_smartcard"/>
+            <Action name="help_doc_vsa10573"/>
+            <Action name="help_doc_vsa10584"/>
+            <Separator/>
             <Action name="help_check_updates"/>
         </Menu>
     </MenuBar>
@@ -119,12 +128,14 @@
         <Action name="certificates_change_passphrase"/>
         <Action name="certificates_add_userid"/>
         <Separator/>
+        <Action name="certificates_revoke"/>
         <Action name="certificates_delete"/>
         <Separator/>
         <Action name="file_export_certificates"/>
         <Action name="file_export_secret_keys"/>
         <Action name="file_export_paper_key"/>
         <Action name="file_export_certificates_to_server"/>
+        <Action name="file_export_certificate_to_provider"/>
         <Separator/>
         <Action name="view_certificate_details"/>
     </Menu>

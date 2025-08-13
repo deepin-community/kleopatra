@@ -51,7 +51,7 @@ class AbstractDecryptVerifyTask : public Task
     Q_OBJECT
 public:
     explicit AbstractDecryptVerifyTask(QObject *parent = nullptr);
-    virtual ~AbstractDecryptVerifyTask();
+    ~AbstractDecryptVerifyTask() override;
     virtual void autodetectProtocolFromInput() = 0;
 
     KMime::Types::Mailbox informativeSender() const;
@@ -66,7 +66,7 @@ Q_SIGNALS:
 protected:
     std::shared_ptr<DecryptVerifyResult> fromDecryptResult(const GpgME::DecryptionResult &dr, const QByteArray &plaintext, const AuditLog &auditLog);
     std::shared_ptr<DecryptVerifyResult> fromDecryptResult(const GpgME::Error &err, const QString &details, const AuditLog &auditLog);
-    std::shared_ptr<DecryptVerifyResult> fromDecryptVerifyResult(const GpgME::DecryptionResult &dr, const GpgME::VerificationResult &vr, const QByteArray &plaintext, const AuditLog &auditLog);
+    std::shared_ptr<DecryptVerifyResult> fromDecryptVerifyResult(const GpgME::DecryptionResult &dr, const GpgME::VerificationResult &vr, const QByteArray &plaintext, const QString &fileName, const AuditLog &auditLog);
     std::shared_ptr<DecryptVerifyResult> fromDecryptVerifyResult(const GpgME::Error &err, const QString &what, const AuditLog &auditLog);
     std::shared_ptr<DecryptVerifyResult> fromVerifyOpaqueResult(const GpgME::VerificationResult &vr, const QByteArray &plaintext, const AuditLog &auditLog);
     std::shared_ptr<DecryptVerifyResult> fromVerifyOpaqueResult(const GpgME::Error &err, const QString &details, const AuditLog &auditLog);
@@ -220,8 +220,7 @@ public:
 
     QString overview() const override;
     QString details() const override;
-    bool hasError() const;
-    int errorCode() const override;
+    GpgME::Error error() const override;
     QString errorString() const override;
     VisualCode code() const override;
     AuditLog auditLog() const override;
@@ -229,6 +228,7 @@ public:
 
     GpgME::VerificationResult verificationResult() const;
     GpgME::DecryptionResult decryptionResult() const;
+    QString fileName() const;
 
 private:
     static QString keyToString(const GpgME::Key &key);
@@ -242,7 +242,8 @@ private:
                         const GpgME::VerificationResult &vr,
                         const GpgME::DecryptionResult &dr,
                         const QByteArray &stuff,
-                        int errCode,
+                        const QString &fileName,
+                        const GpgME::Error &error,
                         const QString &errString,
                         const QString &inputLabel,
                         const QString &outputLabel,

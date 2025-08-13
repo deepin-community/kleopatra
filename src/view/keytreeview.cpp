@@ -10,11 +10,13 @@
 #include <config-kleopatra.h>
 
 #include "keytreeview.h"
+#include "searchbar.h"
 
 #include <Libkleo/KeyList>
 #include <Libkleo/KeyListModel>
 #include <Libkleo/KeyListSortFilterProxyModel>
 #include <Libkleo/KeyRearrangeColumnsProxyModel>
+#include <Libkleo/NavigatableTreeView>
 #include <Libkleo/Predicates>
 
 #include "utils/headerview.h"
@@ -28,7 +30,6 @@
 
 #include "kleopatra_debug.h"
 #include <QTimer>
-#include <QTreeView>
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QItemSelection>
@@ -42,11 +43,6 @@
 #include <KSharedConfig>
 #include <KLocalizedString>
 
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E00 // 1.14.0
-# define GPGME_HAS_REMARKS
-#endif
-
 #define TAGS_COLUMN 13
 
 using namespace Kleo;
@@ -57,10 +53,11 @@ Q_DECLARE_METATYPE(GpgME::Key)
 namespace
 {
 
-class TreeView : public QTreeView
+class TreeView : public NavigatableTreeView
 {
 public:
-    explicit TreeView(QWidget *parent = nullptr) : QTreeView(parent)
+    explicit TreeView(QWidget *parent = nullptr)
+        : NavigatableTreeView{parent}
     {
         header()->installEventFilter(this);
     }
@@ -117,6 +114,24 @@ protected:
         }
 
         return false;
+    }
+
+    void focusInEvent(QFocusEvent *event) override
+    {
+        QTreeView::focusInEvent(event);
+        // queue the invokation, so that it happens after the widget itself got focus
+        QMetaObject::invokeMethod(this, &TreeView::forceAccessibleFocusEventForCurrentItem, Qt::QueuedConnection);
+    }
+
+private:
+    void forceAccessibleFocusEventForCurrentItem()
+    {
+        // force Qt to send a focus event for the current item to accessibility
+        // tools; otherwise, the user has no idea which item is selected when the
+        // list gets keyboard input focus
+        const auto current = currentIndex();
+        setCurrentIndex({});
+        setCurrentIndex(current);
     }
 
 private:
@@ -255,9 +270,12 @@ void KeyTreeView::init()
 
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    //m_view->setAlternatingRowColors( true );
-    m_view->setAllColumnsShowFocus(true);
+    m_view->setAllColumnsShowFocus(false);
     m_view->setSortingEnabled(true);
+    m_view->setAccessibleName(i18n("Certificates"));
+    m_view->setAccessibleDescription(m_isHierarchical ? i18n("Hierarchical list of certificates") : i18n("List of certificates"));
+    // we show details on double-click
+    m_view->setExpandsOnDoubleClick(false);
 
     if (model()) {
         if (m_additionalProxy) {
@@ -273,7 +291,7 @@ void KeyTreeView::init()
         }
     }
 
-    m_proxy->setFilterFixedString(m_stringFilter);
+    m_proxy->setFilterRegularExpression(QRegularExpression::escape(m_stringFilter));
     m_proxy->setKeyFilter(m_keyFilter);
     m_proxy->setSortCaseSensitivity(Qt::CaseInsensitive);
 
@@ -292,10 +310,8 @@ void KeyTreeView::init()
                                                      << KeyList::LastUpdate
                                                      << KeyList::Issuer
                                                      << KeyList::SerialNumber
-#ifdef GPGME_HAS_REMARKS
     // If a column is added before this TAGS_COLUMN define has to be updated accordingly
                                                      << KeyList::Remarks
-#endif
     );
     m_view->setModel(rearangingModel);
 
@@ -386,7 +402,6 @@ void KeyTreeView::restoreExpandState()
 
 void KeyTreeView::setUpTagKeys()
 {
-#ifdef GPGME_HAS_REMARKS
     const auto tagKeys = Tags::tagKeys();
     if (m_hierarchicalModel) {
         m_hierarchicalModel->setRemarkKeys(tagKeys);
@@ -394,7 +409,6 @@ void KeyTreeView::setUpTagKeys()
     if (m_flatModel) {
         m_flatModel->setRemarkKeys(tagKeys);
     }
-#endif
 }
 
 void KeyTreeView::saveLayout(KConfigGroup &group)
@@ -527,7 +541,7 @@ void KeyTreeView::setStringFilter(const QString &filter)
         return;
     }
     m_stringFilter = filter;
-    m_proxy->setFilterFixedString(filter);
+    m_proxy->setFilterRegularExpression(QRegularExpression::escape(filter));
     Q_EMIT stringFilterChanged(filter);
 }
 
@@ -549,7 +563,7 @@ QItemSelection itemSelectionFromKeys(const std::vector<Key> &keys, const QTreeVi
     return std::accumulate(
         indexes.cbegin(), indexes.cend(),
         QItemSelection(),
-        [] (QItemSelection &selection, const QModelIndex &index) {
+        [] (QItemSelection selection, const QModelIndex &index) {
             if (index.isValid()) {
                 selection.merge(QItemSelection(index, index), QItemSelectionModel::Select);
             }
@@ -598,6 +612,7 @@ void KeyTreeView::setHierarchicalView(bool on)
             m_view->scrollTo(currentIndex);
         }
     }
+    m_view->setAccessibleDescription(m_isHierarchical ? i18n("Hierarchical list of certificates") : i18n("List of certificates"));
     Q_EMIT hierarchicalChanged(on);
 }
 
@@ -681,37 +696,25 @@ void KeyTreeView::removeKeys(const std::vector<Key> &keys)
 
 }
 
-static const struct {
-    const char *signal;
-    const char *slot;
-} connections[] = {
-    {
-        SIGNAL(stringFilterChanged(QString)),
-        SLOT(setStringFilter(QString))
-    },
-    {
-        SIGNAL(keyFilterChanged(std::shared_ptr<Kleo::KeyFilter>)),
-        SLOT(setKeyFilter(std::shared_ptr<Kleo::KeyFilter>))
-    },
-};
-static const unsigned int numConnections = sizeof connections / sizeof * connections;
-
-void KeyTreeView::disconnectSearchBar(const QObject *bar)
+void KeyTreeView::disconnectSearchBar()
 {
-    for (unsigned int i = 0; i < numConnections; ++i) {
-        disconnect(this, connections[i].signal, bar,  connections[i].slot);
-        disconnect(bar,  connections[i].signal, this, connections[i].slot);
+    for (const auto &connection : m_connections) {
+        disconnect(connection);
     }
+    m_connections.clear();
 }
 
-bool KeyTreeView::connectSearchBar(const QObject *bar)
+bool KeyTreeView::connectSearchBar(const SearchBar *bar)
 {
-    for (unsigned int i = 0; i < numConnections; ++i)
-        if (!connect(this, connections[i].signal, bar,  connections[i].slot) ||
-                !connect(bar,  connections[i].signal, this, connections[i].slot)) {
-            return false;
-        }
-    return true;
+    m_connections.reserve(4);
+    m_connections.push_back(connect(this, &KeyTreeView::stringFilterChanged, bar, &SearchBar::setStringFilter));
+    m_connections.push_back(connect(bar, &SearchBar::stringFilterChanged, this, &KeyTreeView::setStringFilter));
+    m_connections.push_back(connect(this, &KeyTreeView::keyFilterChanged, bar, &SearchBar::setKeyFilter));
+    m_connections.push_back(connect(bar, &SearchBar::keyFilterChanged, this, &KeyTreeView::setKeyFilter));
+
+    return std::all_of(m_connections.cbegin(), m_connections.cend(), [](const QMetaObject::Connection &conn) {
+        return conn;
+    });
 }
 
 void KeyTreeView::resizeColumns()

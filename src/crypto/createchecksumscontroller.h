@@ -14,7 +14,6 @@
 #include <utils/pimpl_ptr.h>
 
 #include <gpgme++/global.h>
-#include <kmime/kmime_header_parsing.h>
 
 #include <memory>
 #include <vector>
@@ -30,7 +29,7 @@ class CreateChecksumsController : public Controller
 public:
     explicit CreateChecksumsController(QObject *parent = nullptr);
     explicit CreateChecksumsController(const std::shared_ptr<const ExecutionContext> &ctx, QObject *parent = nullptr);
-    ~CreateChecksumsController();
+    ~CreateChecksumsController() override;
 
     void setAllowAddition(bool allow);
     bool allowAddition() const;

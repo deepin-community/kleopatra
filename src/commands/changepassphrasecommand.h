@@ -27,7 +27,7 @@ public:
 
     /* reimp */ static Restrictions restrictions()
     {
-        return OnlyOneKey | NeedSecretKey;
+        return OnlyOneKey | NeedSecretKeyData;
     }
 
 private:
@@ -38,7 +38,6 @@ private:
     class Private;
     inline Private *d_func();
     inline const Private *d_func() const;
-    Q_PRIVATE_SLOT(d_func(), void slotResult(GpgME::Error))
 };
 
 }

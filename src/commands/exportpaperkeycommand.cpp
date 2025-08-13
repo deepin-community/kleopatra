@@ -35,7 +35,11 @@ ExportPaperKeyCommand::ExportPaperKeyCommand(QAbstractItemView *v, KeyListContro
     GnuPGProcessCommand(v, c),
     mParent(v)
 {
-    connect(&mPkProc, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+#if QT_DEPRECATED_SINCE(5, 13)
+    connect(&mPkProc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+#else
+    connect(&mPkProc, &QProcess::finished,
+#endif
             this, &ExportPaperKeyCommand::pkProcFinished);
     mPkProc.setProgram(paperKeyInstallPath());
     mPkProc.setArguments(QStringList() << QStringLiteral("--output-type=base16"));
@@ -61,7 +65,7 @@ QStringList ExportPaperKeyCommand::arguments() const
 bool ExportPaperKeyCommand::preStartHook(QWidget *parent) const
 {
     if (paperKeyInstallPath().isNull()) {
-        KMessageBox::sorry(parent, xi18nc("@info", "<para><application>Kleopatra</application> uses "
+        KMessageBox::error(parent, xi18nc("@info", "<para><application>Kleopatra</application> uses "
                                                    "<application>PaperKey</application> to create a minimized and"
                                                    " printable version of your secret key.</para>"
                                                    "<para>Please make sure it is installed.</para>"),

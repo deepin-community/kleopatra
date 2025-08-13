@@ -18,7 +18,7 @@ class DeviceInfoWatcher : public QObject
     Q_OBJECT
 public:
     explicit DeviceInfoWatcher(QObject *parent = nullptr);
-    ~DeviceInfoWatcher();
+    ~DeviceInfoWatcher() override;
 
     static bool isSupported();
 
@@ -26,6 +26,7 @@ public:
 
 Q_SIGNALS:
     void statusChanged(const QByteArray &details);
+    void startOfGpgAgentRequested();
 
 private:
     class Worker;

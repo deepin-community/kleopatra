@@ -37,7 +37,7 @@ class DecryptVerifyOperationWidget : public QWidget
     Q_PROPERTY(QString signedDataFileName READ signedDataFileName WRITE setSignedDataFileName)
 public:
     explicit DecryptVerifyOperationWidget(QWidget *parent = nullptr);
-    ~DecryptVerifyOperationWidget();
+    ~DecryptVerifyOperationWidget() override;
 
     enum Mode {
         VerifyDetachedWithSignature,
@@ -56,6 +56,9 @@ public:
 
     void setArchiveDefinitions(const std::vector< std::shared_ptr<ArchiveDefinition> > &ads);
     std::shared_ptr<ArchiveDefinition> selectedArchiveDefinition() const;
+
+Q_SIGNALS:
+    void changed();
 
 private:
     class Private;

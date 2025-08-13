@@ -1,5 +1,12 @@
-/*  SPDX-FileCopyrightText: 2016 Klarälvdalens Datakonsult AB
+/*
+    dialogs/certificatedetailswidget.cpp
+
+    This file is part of Kleopatra, the KDE keymanager
+    SPDX-FileCopyrightText: 2016 Klarälvdalens Datakonsult AB
     SPDX-FileCopyrightText: 2017 Intevation GmbH
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
+    SPDX-FileCopyrightText: 2022 Felix Tiede
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -17,62 +24,87 @@
 #include "commands/changepassphrasecommand.h"
 #include "commands/changeexpirycommand.h"
 #include "commands/certifycertificatecommand.h"
+#ifdef MAILAKONADI_ENABLED
+#include "commands/exportopenpgpcerttoprovidercommand.h"
+#endif // MAILAKONADI_ENABLED
+#include "commands/refreshcertificatecommand.h"
 #include "commands/revokecertificationcommand.h"
+#include "commands/revokeuseridcommand.h"
+#include "commands/setprimaryuseridcommand.h"
 #include "commands/adduseridcommand.h"
 #include "commands/genrevokecommand.h"
 #include "commands/detailscommand.h"
 #include "commands/dumpcertificatecommand.h"
-
+#include "utils/accessibility.h"
+#include "utils/keys.h"
 #include "utils/tags.h"
+#include "view/infofield.h"
 
+#include <Libkleo/Algorithm>
+#include <Libkleo/Compliance>
 #include <Libkleo/Formatting>
 #include <Libkleo/Dn>
 #include <Libkleo/KeyCache>
+#include <Libkleo/KeyHelpers>
+#include <Libkleo/GnuPG>
+#include <Libkleo/NavigatableTreeWidget>
 
 #include <KLocalizedString>
+#include <KMessageBox>
+#include <KSeparator>
+#include <kwidgetsaddons_version.h>
 
 #include <gpgme++/context.h>
 #include <gpgme++/key.h>
 #include <gpgme++/keylistresult.h>
 #include <gpgme++/tofuinfo.h>
 
+#include <QGpgME/Debug>
 #include <QGpgME/Protocol>
 #include <QGpgME/KeyListJob>
 
+#include <QClipboard>
 #include <QDateTime>
 #include <QGridLayout>
-#include <QGroupBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QLocale>
 #include <QMenu>
 #include <QPushButton>
-#include <QSpacerItem>
-#include <QToolButton>
+#include <QStringBuilder>
 #include <QTreeWidget>
+#include <QVBoxLayout>
 
+#include <map>
+#if __has_include(<ranges>)
+#include <ranges>
+#if defined(__cpp_lib_ranges) && __cpp_lib_ranges >= 201911L
+#define USE_RANGES
+#endif
+#endif
 #include <set>
-
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E00 // 1.14.0
-# define GPGME_HAS_REMARKS
-#endif
-#if GPGMEPP_VERSION >= 0x10F00 // 1.15.0
-# define GPGME_HAS_WITH_SECRET
-# include <QGpgME/Debug>
-#endif
-
-#define HIDE_ROW(row) \
-    ui.row->setVisible(false); \
-    ui.row##Lbl->setVisible(false);
-
-#define SHOW_ROW(row) \
-    ui.row->setVisible(true); \
-    ui.row##Lbl->setVisible(true);
 
 Q_DECLARE_METATYPE(GpgME::UserID)
 
 using namespace Kleo;
+
+namespace
+{
+std::vector<GpgME::UserID> selectedUserIDs(const QTreeWidget *treeWidget) {
+    if (!treeWidget) {
+        return {};
+    }
+
+    std::vector<GpgME::UserID> userIDs;
+    const auto selected = treeWidget->selectedItems();
+    std::transform(selected.begin(), selected.end(), std::back_inserter(userIDs), [](const QTreeWidgetItem *item) {
+        return item->data(0, Qt::UserRole).value<GpgME::UserID>();
+    });
+    return userIDs;
+}
+}
 
 class CertificateDetailsWidget::Private
 {
@@ -80,31 +112,41 @@ public:
     Private(CertificateDetailsWidget *qq);
 
     void setupCommonProperties();
+    void updateUserIDActions();
+    void setUpUserIDTable();
+    void setUpSMIMEAdressList();
     void setupPGPProperties();
     void setupSMIMEProperties();
 
-    void revokeUID(const GpgME::UserID &uid);
+    void revokeUserID(const GpgME::UserID &uid);
+    void revokeSelectedUserID();
     void genRevokeCert();
-    void certifyClicked();
+    void refreshCertificate();
+    void certifyUserIDs();
+    void revokeCertifications();
     void webOfTrustClicked();
     void exportClicked();
     void addUserID();
+    void setPrimaryUserID(const GpgME::UserID &uid = {});
     void changePassphrase();
     void changeExpiration();
     void keysMayHaveChanged();
     void showTrustChainDialog();
     void showMoreDetails();
-    void publishCertificate();
     void userIDTableContextMenuRequested(const QPoint &p);
 
     QString tofuTooltipString(const GpgME::UserID &uid) const;
+    QIcon trustLevelIcon(const GpgME::UserID &uid) const;
+    QString trustLevelText(const GpgME::UserID &uid) const;
 
-    void smimeLinkActivated(const QString &link);
+    void showIssuerCertificate();
 
+    void updateKey();
     void setUpdatedKey(const GpgME::Key &key);
     void keyListDone(const GpgME::KeyListResult &,
                      const std::vector<GpgME::Key> &, const QString &,
                      const GpgME::Error &);
+    void copyFingerprintToClipboard();
 
 private:
     CertificateDetailsWidget *const q;
@@ -114,239 +156,229 @@ public:
     bool updateInProgress = false;
 
 private:
+    InfoField *attributeField(const QString &attributeName)
+    {
+        const auto keyValuePairIt = ui.smimeAttributeFields.find(attributeName);
+        if (keyValuePairIt != ui.smimeAttributeFields.end()) {
+            return (*keyValuePairIt).second.get();
+        }
+        return nullptr;
+    }
+
+private:
     struct UI {
-        QGridLayout *gridLayout_2;
-        QHBoxLayout *hboxLayout_1;
-        QPushButton *addUserIDBtn;
-        QPushButton *changePassphraseBtn;
-        QPushButton *trustChainDetailsBtn;
-        QPushButton *genRevokeBtn;
-        QPushButton *certifyBtn;
-        QGroupBox *groupBox;
-        QGridLayout *gridLayout;
-        QLabel *validFromLbl;
-        QLabel *validFrom;
-        QSpacerItem *horizontalSpacer_3;
-        QLabel *expiresLbl;
-        QHBoxLayout *horizontalLayout_3;
-        QLabel *expires;
-        QToolButton *changeExpirationBtn;
-        QLabel *typeLbl;
-        QLabel *type;
-        QLabel *fingerprintLbl;
-        QLabel *fingerprint;
-        QLabel *publishingLbl;
-        QPushButton *publishing;
-        QLabel *smimeIssuerLbl;
-        QLabel *smimeIssuer;
-        QLabel *compliance;
-        QLabel *complianceLbl;
-        QLabel *trustedIntroducerLbl;
-        QLabel *trustedIntroducer;
-        QHBoxLayout *horizontalLayout;
-        QPushButton *moreDetailsBtn;
-        QPushButton *exportBtn;
-        QPushButton *webOfTrustBtn;
-        QSpacerItem *horizontalSpacer;
-        QTreeWidget *userIDTable;
-        QLabel *label;
-        QLabel *smimeOwnerLbl;
-        QLabel *smimeRelatedAddresses;
-        QLabel *smimeOwner;
+        QWidget *userIDs = nullptr;
+        QLabel *userIDTableLabel = nullptr;
+        NavigatableTreeWidget *userIDTable = nullptr;
+        QPushButton *addUserIDBtn = nullptr;
+        QPushButton *setPrimaryUserIDBtn = nullptr;
+        QPushButton *certifyBtn = nullptr;
+        QPushButton *revokeCertificationsBtn = nullptr;
+        QPushButton *revokeUserIDBtn = nullptr;
+        QPushButton *webOfTrustBtn = nullptr;
+
+        std::map<QString, std::unique_ptr<InfoField>> smimeAttributeFields;
+        std::unique_ptr<InfoField> smimeTrustLevelField;
+        std::unique_ptr<InfoField> validFromField;
+        std::unique_ptr<InfoField> expiresField;
+        QAction *changeExpirationAction = nullptr;
+        std::unique_ptr<InfoField> fingerprintField;
+        QAction *copyFingerprintAction = nullptr;
+        std::unique_ptr<InfoField> smimeIssuerField;
+        QAction *showIssuerCertificateAction = nullptr;
+        std::unique_ptr<InfoField> complianceField;
+        std::unique_ptr<InfoField> trustedIntroducerField;
+
+        QLabel *smimeRelatedAddresses = nullptr;
+        QListWidget *smimeAddressList = nullptr;
+
+        QPushButton *moreDetailsBtn = nullptr;
+        QPushButton *trustChainDetailsBtn = nullptr;
+        QPushButton *refreshBtn = nullptr;
+        QPushButton *changePassphraseBtn = nullptr;
+        QPushButton *exportBtn = nullptr;
+        QPushButton *genRevokeBtn = nullptr;
 
         void setupUi(QWidget *parent)
         {
-            gridLayout_2 = new QGridLayout(parent);
-            gridLayout_2->setContentsMargins(0, 0, 0, 0);
-            hboxLayout_1 = new QHBoxLayout();
-            addUserIDBtn = new QPushButton(i18n("Add email address"), parent);
+            auto mainLayout = new QVBoxLayout{parent};
 
-            hboxLayout_1->addWidget(addUserIDBtn);
+            userIDs = new QWidget{parent};
+            {
+            auto userIDsLayout = new QVBoxLayout{userIDs};
+            userIDsLayout->setContentsMargins({});
 
-            changePassphraseBtn = new QPushButton(i18n("Change passphrase"), parent);
+            userIDTableLabel = new QLabel(i18n("User IDs:"), parent);
+            userIDsLayout->addWidget(userIDTableLabel);
 
-            hboxLayout_1->addWidget(changePassphraseBtn);
-
-            trustChainDetailsBtn = new QPushButton(i18n("Trust chain details..."), parent);
-
-            hboxLayout_1->addWidget(trustChainDetailsBtn);
-
-            genRevokeBtn = new QPushButton(i18n("Generate revocation certificate"), parent);
-            genRevokeBtn->setToolTip(u"<html>" +
-                                     i18n("A revocation certificate is a file that serves as a \"kill switch\" to publicly "
-                                          "declare that a key shall not anymore be used.  It is not possible "
-                                          "to retract such a revocation certificate once it has been published.") +
-                                     u"</html>");
-
-            hboxLayout_1->addWidget(genRevokeBtn);
-
-            certifyBtn = new QPushButton(i18n("Certify"), parent);
-
-            hboxLayout_1->addWidget(certifyBtn);
-
-            gridLayout_2->addLayout(hboxLayout_1, 4, 0, 1, 3);
-
-            groupBox = new QGroupBox(i18n("Certificate Details"), parent);
-            groupBox->setFlat(false);
-            gridLayout = new QGridLayout(groupBox);
-            int row = 0;
-            validFromLbl = new QLabel(i18n("Valid from:"), groupBox);
-
-            gridLayout->addWidget(validFromLbl, row, 0, 1, 1);
-
-            validFrom = new QLabel(groupBox);
-            validFrom->setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse);
-
-            gridLayout->addWidget(validFrom, row, 1, 1, 1);
-
-            horizontalSpacer_3 = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-
-            gridLayout->addItem(horizontalSpacer_3, row, 2, 1, 1);
-            row++;
-
-            expiresLbl = new QLabel(i18n("Expires:"), groupBox);
-
-            gridLayout->addWidget(expiresLbl, row, 0, 1, 1);
-
-            horizontalLayout_3 = new QHBoxLayout();
-            expires = new QLabel(groupBox);
-            expires->setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse);
-
-            horizontalLayout_3->addWidget(expires);
-
-            changeExpirationBtn = new QToolButton(groupBox);
-            changeExpirationBtn->setToolTip(i18n("Change"));
-            changeExpirationBtn->setIcon(QIcon::fromTheme(QStringLiteral("editor")));
-            changeExpirationBtn->setIconSize(QSize(16, 16));
-            changeExpirationBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-
-            horizontalLayout_3->addWidget(changeExpirationBtn);
-
-            gridLayout->addLayout(horizontalLayout_3, row, 1, 1, 1);
-            row++;
-
-            typeLbl = new QLabel(i18n("Type:"), groupBox);
-
-            gridLayout->addWidget(typeLbl, row, 0, 1, 1);
-
-            type = new QLabel(groupBox);
-            type->setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse);
-
-            gridLayout->addWidget(type, row, 1, 1, 1);
-            row++;
-
-            fingerprintLbl = new QLabel(i18n("Fingerprint:"), groupBox);
-
-            gridLayout->addWidget(fingerprintLbl, row, 0, 1, 1);
-
-            fingerprint = new QLabel(groupBox);
-            fingerprint->setTextInteractionFlags(Qt::LinksAccessibleByMouse|Qt::TextSelectableByMouse);
-
-            gridLayout->addWidget(fingerprint, row, 1, 1, 2);
-            row++;
-
-            publishingLbl = new QLabel(i18n("Publishing:"), groupBox);
-
-            gridLayout->addWidget(publishingLbl, row, 0, 1, 1);
-
-            publishing = new QPushButton(i18n("Publish Certificate"), groupBox);
-
-            gridLayout->addWidget(publishing, row, 1, 1, 1);
-            row++;
-
-            smimeIssuerLbl = new QLabel(i18n("Issuer:"), groupBox);
-
-            gridLayout->addWidget(smimeIssuerLbl, row, 0, 1, 1);
-
-            smimeIssuer = new QLabel(groupBox);
-            smimeIssuer->setWordWrap(true);
-            smimeIssuer->setTextInteractionFlags(Qt::TextBrowserInteraction);
-
-            gridLayout->addWidget(smimeIssuer, row, 1, 1, 2);
-            row++;
-
-            compliance = new QLabel(i18n("Compliance:"), groupBox);
-            compliance->setWordWrap(true);
-            compliance->setTextInteractionFlags(Qt::TextBrowserInteraction);
-
-            gridLayout->addWidget(compliance, row, 0, 1, 1);
-
-            complianceLbl = new QLabel(groupBox);
-            complianceLbl->setWordWrap(true);
-            complianceLbl->setTextInteractionFlags(Qt::TextBrowserInteraction);
-
-            gridLayout->addWidget(complianceLbl, row, 1, 1, 2);
-            row++;
-
-            trustedIntroducerLbl = new QLabel(i18n("Trusted introducer for:"), groupBox);
-            trustedIntroducerLbl->setToolTip(i18n("See certifications for details."));
-            trustedIntroducerLbl->setTextInteractionFlags(Qt::TextBrowserInteraction);
-
-            gridLayout->addWidget(trustedIntroducerLbl, row, 0, 1, 1);
-
-            trustedIntroducer = new QLabel(groupBox);
-            trustedIntroducer->setWordWrap(true);
-            trustedIntroducer->setToolTip(i18n("See certifications for details."));
-            trustedIntroducer->setTextInteractionFlags(Qt::TextBrowserInteraction);
-
-            gridLayout->addWidget(trustedIntroducer, row, 1, 1, 2);
-            row++;
-
-            horizontalLayout = new QHBoxLayout();
-            moreDetailsBtn = new QPushButton(i18n("More details..."), groupBox);
-
-            horizontalLayout->addWidget(moreDetailsBtn);
-
-            exportBtn = new QPushButton(i18n("Export..."), groupBox);
-
-            horizontalLayout->addWidget(exportBtn);
-
-            webOfTrustBtn = new QPushButton(i18n("Certifications..."), groupBox);
-
-            horizontalLayout->addWidget(webOfTrustBtn);
-
-            horizontalSpacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
-
-            horizontalLayout->addItem(horizontalSpacer);
-
-            gridLayout->addLayout(horizontalLayout, row, 0, 1, 3);
-
-            gridLayout_2->addWidget(groupBox, 6, 0, 1, 3);
-
-            userIDTable = new QTreeWidget(parent);
+            userIDTable = new NavigatableTreeWidget{parent};
+            userIDTableLabel->setBuddy(userIDTable);
+            userIDTable->setAccessibleName(i18n("User IDs"));
             QTreeWidgetItem *__qtreewidgetitem = new QTreeWidgetItem();
             __qtreewidgetitem->setText(0, QString::fromUtf8("1"));
             userIDTable->setHeaderItem(__qtreewidgetitem);
             userIDTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-            userIDTable->setSelectionMode(QAbstractItemView::SingleSelection);
+            userIDTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
             userIDTable->setRootIsDecorated(false);
             userIDTable->setUniformRowHeights(true);
-            userIDTable->setAllColumnsShowFocus(true);
+            userIDTable->setAllColumnsShowFocus(false);
 
-            gridLayout_2->addWidget(userIDTable, 3, 0, 1, 3);
+            userIDsLayout->addWidget(userIDTable);
 
-            label = new QLabel(i18n("You can use this certificate to secure communication with the following email addresses:"), parent);
-            label->setWordWrap(true);
+            {
+            auto buttonRow = new QHBoxLayout;
 
-            gridLayout_2->addWidget(label, 0, 0, 1, 3);
+            addUserIDBtn = new QPushButton(i18nc("@action:button", "Add User ID"), parent);
+            buttonRow->addWidget(addUserIDBtn);
 
-            smimeOwnerLbl = new QLabel(i18n("Owner:"), parent);
+            setPrimaryUserIDBtn = new QPushButton{i18nc("@action:button", "Flag as Primary"), parent};
+            setPrimaryUserIDBtn->setToolTip(i18nc("@info:tooltip", "Flag the selected user ID as the primary user ID of this key."));
+            buttonRow->addWidget(setPrimaryUserIDBtn);
 
-            gridLayout_2->addWidget(smimeOwnerLbl, 1, 0, 1, 1);
+            certifyBtn = new QPushButton(i18nc("@action:button", "Certify User IDs"), parent);
+            buttonRow->addWidget(certifyBtn);
+
+            webOfTrustBtn = new QPushButton(i18nc("@action:button", "Show Certifications"), parent);
+            buttonRow->addWidget(webOfTrustBtn);
+
+            revokeCertificationsBtn = new QPushButton(i18nc("@action:button", "Revoke Certifications"), parent);
+            buttonRow->addWidget(revokeCertificationsBtn);
+
+            revokeUserIDBtn = new QPushButton(i18nc("@action:button", "Revoke User ID"), parent);
+            buttonRow->addWidget(revokeUserIDBtn);
+
+            buttonRow->addStretch(1);
+
+            userIDsLayout->addLayout(buttonRow);
+            }
+
+            userIDsLayout->addWidget(new KSeparator{Qt::Horizontal, parent});
+            }
+
+            mainLayout->addWidget(userIDs);
+
+            {
+                auto gridLayout = new QGridLayout;
+                gridLayout->setColumnStretch(1, 1);
+
+                int row = -1;
+                for (const auto &attribute : DN::attributeOrder()) {
+                    const auto attributeLabel = DN::attributeNameToLabel(attribute);
+                    if (attributeLabel.isEmpty()) {
+                        continue;
+                    }
+                    const auto labelWithColon = i18nc("interpunctation for labels", "%1:", attributeLabel);
+                    const auto & [it, inserted] = smimeAttributeFields.try_emplace(attribute, std::make_unique<InfoField>(labelWithColon, parent));
+                    if (inserted) {
+                        row++;
+                        const auto &field = it->second;
+                        gridLayout->addWidget(field->label(), row, 0);
+                        gridLayout->addLayout(field->layout(), row, 1);
+                    }
+                }
+
+                row++;
+                smimeTrustLevelField = std::make_unique<InfoField>(i18n("Trust level:"), parent);
+                gridLayout->addWidget(smimeTrustLevelField->label(), row, 0);
+                gridLayout->addLayout(smimeTrustLevelField->layout(), row, 1);
+
+                row++;
+                validFromField = std::make_unique<InfoField>(i18n("Valid from:"), parent);
+                gridLayout->addWidget(validFromField->label(), row, 0);
+                gridLayout->addLayout(validFromField->layout(), row, 1);
+
+                row++;
+                expiresField = std::make_unique<InfoField>(i18n("Valid until:"), parent);
+                changeExpirationAction = new QAction{parent};
+                changeExpirationAction->setIcon(QIcon::fromTheme(QStringLiteral("editor")));
+                changeExpirationAction->setToolTip(i18nc("@info:tooltip", "Change the end of the validity period"));
+                Kleo::setAccessibleName(changeExpirationAction, i18nc("@action:button", "Change Validity"));
+                expiresField->setAction(changeExpirationAction);
+                gridLayout->addWidget(expiresField->label(), row, 0);
+                gridLayout->addLayout(expiresField->layout(), row, 1);
+
+                row++;
+                fingerprintField = std::make_unique<InfoField>(i18n("Fingerprint:"), parent);
+                if (QGuiApplication::clipboard()) {
+                    copyFingerprintAction = new QAction{parent};
+                    copyFingerprintAction->setIcon(QIcon::fromTheme(QStringLiteral("edit-copy")));
+                    copyFingerprintAction->setToolTip(i18nc("@info:tooltip", "Copy the fingerprint to the clipboard"));
+                    Kleo::setAccessibleName(copyFingerprintAction, i18nc("@action:button", "Copy fingerprint"));
+                    fingerprintField->setAction(copyFingerprintAction);
+                }
+                gridLayout->addWidget(fingerprintField->label(), row, 0);
+                gridLayout->addLayout(fingerprintField->layout(), row, 1);
+
+                row++;
+                smimeIssuerField = std::make_unique<InfoField>(i18n("Issuer:"), parent);
+                showIssuerCertificateAction = new QAction{parent};
+                showIssuerCertificateAction->setIcon(QIcon::fromTheme(QStringLiteral("dialog-information")));
+                showIssuerCertificateAction->setToolTip(i18nc("@info:tooltip", "Show the issuer certificate"));
+                Kleo::setAccessibleName(showIssuerCertificateAction, i18nc("@action:button", "Show certificate"));
+                smimeIssuerField->setAction(showIssuerCertificateAction);
+                gridLayout->addWidget(smimeIssuerField->label(), row, 0);
+                gridLayout->addLayout(smimeIssuerField->layout(), row, 1);
+
+                row++;
+                complianceField = std::make_unique<InfoField>(i18n("Compliance:"), parent);
+                gridLayout->addWidget(complianceField->label(), row, 0);
+                gridLayout->addLayout(complianceField->layout(), row, 1);
+
+                row++;
+                trustedIntroducerField = std::make_unique<InfoField>(i18n("Trusted introducer for:"), parent);
+                gridLayout->addWidget(trustedIntroducerField->label(), row, 0);
+                trustedIntroducerField->setToolTip(i18n("See certifications for details."));
+                gridLayout->addLayout(trustedIntroducerField->layout(), row, 1);
+
+                mainLayout->addLayout(gridLayout);
+            }
 
             smimeRelatedAddresses = new QLabel(i18n("Related addresses:"), parent);
-            QFont font;
-            font.setBold(true);
-            font.setWeight(75);
-            smimeRelatedAddresses->setFont(font);
+            mainLayout->addWidget(smimeRelatedAddresses);
 
-            gridLayout_2->addWidget(smimeRelatedAddresses, 2, 0, 1, 1);
+            smimeAddressList = new QListWidget{parent};
+            smimeRelatedAddresses->setBuddy(smimeAddressList);
+            smimeAddressList->setAccessibleName(i18n("Related addresses"));
+            smimeAddressList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            smimeAddressList->setSelectionMode(QAbstractItemView::SingleSelection);
 
-            smimeOwner = new QLabel(parent);
-            smimeOwner->setWordWrap(true);
-            smimeOwner->setTextInteractionFlags(Qt::TextBrowserInteraction);
+            mainLayout->addWidget(smimeAddressList);
 
-            gridLayout_2->addWidget(smimeOwner, 1, 1, 1, 2);
+            mainLayout->addStretch();
+
+            {
+                auto buttonRow = new QHBoxLayout;
+
+                moreDetailsBtn = new QPushButton(i18nc("@action:button", "More Details..."), parent);
+                buttonRow->addWidget(moreDetailsBtn);
+
+                trustChainDetailsBtn = new QPushButton(i18nc("@action:button", "Trust Chain Details"), parent);
+                buttonRow->addWidget(trustChainDetailsBtn);
+
+                refreshBtn = new QPushButton{i18nc("@action:button", "Update"), parent};
+#ifndef QGPGME_SUPPORTS_KEY_REFRESH
+                refreshBtn->setVisible(false);
+#endif
+                buttonRow->addWidget(refreshBtn);
+
+                exportBtn = new QPushButton(i18nc("@action:button", "Export"), parent);
+                buttonRow->addWidget(exportBtn);
+
+                changePassphraseBtn = new QPushButton(i18nc("@action:button", "Change Passphrase"), parent);
+                buttonRow->addWidget(changePassphraseBtn);
+
+                genRevokeBtn = new QPushButton(i18nc("@action:button", "Generate Revocation Certificate"), parent);
+                genRevokeBtn->setToolTip(u"<html>" %
+                                        i18n("A revocation certificate is a file that serves as a \"kill switch\" to publicly "
+                                            "declare that a key shall not anymore be used.  It is not possible "
+                                            "to retract such a revocation certificate once it has been published.") %
+                                        u"</html>");
+                buttonRow->addWidget(genRevokeBtn);
+
+                buttonRow->addStretch(1);
+
+                mainLayout->addLayout(buttonRow);
+            }
         }
     } ui;
 };
@@ -356,30 +388,43 @@ CertificateDetailsWidget::Private::Private(CertificateDetailsWidget *qq)
 {
     ui.setupUi(q);
 
+    ui.userIDTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui.userIDTable, &QAbstractItemView::customContextMenuRequested,
+            q, [this](const QPoint &p) { userIDTableContextMenuRequested(p); });
+    connect(ui.userIDTable, &QTreeWidget::itemSelectionChanged,
+            q, [this]() { updateUserIDActions(); });
     connect(ui.addUserIDBtn, &QPushButton::clicked,
             q, [this]() { addUserID(); });
+    connect(ui.setPrimaryUserIDBtn, &QPushButton::clicked,
+            q, [this]() { setPrimaryUserID(); });
+    connect(ui.revokeUserIDBtn, &QPushButton::clicked,
+            q, [this]() { revokeSelectedUserID(); });
     connect(ui.changePassphraseBtn, &QPushButton::clicked,
             q, [this]() { changePassphrase(); });
     connect(ui.genRevokeBtn, &QPushButton::clicked,
             q, [this]() { genRevokeCert(); });
-    connect(ui.changeExpirationBtn, &QPushButton::clicked,
+    connect(ui.changeExpirationAction, &QAction::triggered,
             q, [this]() { changeExpiration(); });
-    connect(ui.smimeOwner, &QLabel::linkActivated,
-            q, [this](const QString &link) { smimeLinkActivated(link); });
-    connect(ui.smimeIssuer, &QLabel::linkActivated,
-            q, [this](const QString &link) { smimeLinkActivated(link); });
+    connect(ui.showIssuerCertificateAction, &QAction::triggered,
+            q, [this]() { showIssuerCertificate(); });
     connect(ui.trustChainDetailsBtn, &QPushButton::pressed,
             q, [this]() { showTrustChainDialog(); });
     connect(ui.moreDetailsBtn, &QPushButton::pressed,
             q, [this]() { showMoreDetails(); });
-    connect(ui.publishing, &QPushButton::pressed,
-            q, [this]() { publishCertificate(); });
+    connect(ui.refreshBtn, &QPushButton::clicked,
+            q, [this]() { refreshCertificate(); });
     connect(ui.certifyBtn, &QPushButton::clicked,
-            q, [this]() { certifyClicked(); });
+            q, [this]() { certifyUserIDs(); });
+    connect(ui.revokeCertificationsBtn, &QPushButton::clicked,
+            q, [this]() { revokeCertifications(); });
     connect(ui.webOfTrustBtn, &QPushButton::clicked,
             q, [this]() { webOfTrustClicked(); });
     connect(ui.exportBtn, &QPushButton::clicked,
             q, [this]() { exportClicked(); });
+    if (ui.copyFingerprintAction) {
+        connect(ui.copyFingerprintAction, &QAction::triggered,
+                q, [this]() { copyFingerprintToClipboard(); });
+    }
 
     connect(Kleo::KeyCache::instance().get(), &Kleo::KeyCache::keysMayHaveChanged,
             q, [this]() { keysMayHaveChanged(); });
@@ -387,41 +432,91 @@ CertificateDetailsWidget::Private::Private(CertificateDetailsWidget *qq)
 
 void CertificateDetailsWidget::Private::setupCommonProperties()
 {
-    // TODO: Enable once implemented
-    HIDE_ROW(publishing)
-
-    const bool hasSecret = key.hasSecret();
     const bool isOpenPGP = key.protocol() == GpgME::OpenPGP;
-    // TODO: Enable once implemented
-    const bool canRevokeUID = false; // isOpenPGP && hasSecret
+    const bool isSMIME = key.protocol() == GpgME::CMS;
+    const bool isOwnKey = key.hasSecret();
+    const auto isLocalKey = !isRemoteKey(key);
+    const auto keyCanBeCertified = Kleo::canBeCertified(key);
 
-    ui.changePassphraseBtn->setVisible(hasSecret);
-    ui.genRevokeBtn->setVisible(isOpenPGP && hasSecret);
-    ui.certifyBtn->setVisible(isOpenPGP && !hasSecret);
-    ui.changeExpirationBtn->setVisible(isOpenPGP && hasSecret);
-    ui.addUserIDBtn->setVisible(hasSecret && isOpenPGP);
-    ui.webOfTrustBtn->setVisible(isOpenPGP);
+    // update visibility of UI elements
+    ui.userIDs->setVisible(isOpenPGP);
+    ui.addUserIDBtn->setVisible(isOwnKey);
+#ifdef QGPGME_SUPPORTS_SET_PRIMARY_UID
+    ui.setPrimaryUserIDBtn->setVisible(isOwnKey);
+#else
+    ui.setPrimaryUserIDBtn->setVisible(false);
+#endif
+    // ui.certifyBtn->setVisible(true); // always visible (for OpenPGP keys)
+    // ui.webOfTrustBtn->setVisible(true); // always visible (for OpenPGP keys)
+    ui.revokeCertificationsBtn->setVisible(Kleo::Commands::RevokeCertificationCommand::isSupported());
+    ui.revokeUserIDBtn->setVisible(isOwnKey);
 
-    ui.hboxLayout_1->addStretch(1);
-
-    ui.validFrom->setText(Kleo::Formatting::creationDateString(key));
-    const QString expiry = Kleo::Formatting::expirationDateString(key);
-    ui.expires->setText(expiry.isEmpty() ? i18nc("Expires", "never") : expiry);
-    ui.type->setText(Kleo::Formatting::type(key));
-    ui.fingerprint->setText(Formatting::prettyID(key.primaryFingerprint()));
-
-    if (Kleo::Formatting::complianceMode().isEmpty()) {
-        HIDE_ROW(compliance)
-    } else {
-        ui.complianceLbl->setText(Kleo::Formatting::complianceStringForKey(key));
+    for (const auto &[_, field] : ui.smimeAttributeFields) {
+        field->setVisible(isSMIME);
     }
+    ui.smimeTrustLevelField->setVisible(isSMIME);
+    // ui.validFromField->setVisible(true); // always visible
+    // ui.expiresField->setVisible(true); // always visible
+    if (isOpenPGP && isOwnKey) {
+        ui.expiresField->setAction(ui.changeExpirationAction);
+    } else {
+        ui.expiresField->setAction(nullptr);
+    }
+    // ui.fingerprintField->setVisible(true); // always visible
+    ui.smimeIssuerField->setVisible(isSMIME);
+    ui.complianceField->setVisible(DeVSCompliance::isCompliant());
+    ui.trustedIntroducerField->setVisible(isOpenPGP); // may be hidden again by setupPGPProperties()
 
+    ui.smimeRelatedAddresses->setVisible(isSMIME);
+    ui.smimeAddressList->setVisible(isSMIME);
+
+    ui.moreDetailsBtn->setVisible(isLocalKey);
+    ui.trustChainDetailsBtn->setVisible(isSMIME);
+    ui.refreshBtn->setVisible(isLocalKey);
+    ui.changePassphraseBtn->setVisible(isSecretKeyStoredInKeyRing(key));
+    ui.exportBtn->setVisible(isLocalKey);
+    ui.genRevokeBtn->setVisible(isOpenPGP && isOwnKey);
+
+    // update availability of buttons
+    const auto userCanSignUserIDs = userHasCertificationKey();
+    ui.addUserIDBtn->setEnabled(canBeUsedForSecretKeyOperations(key));
+    ui.setPrimaryUserIDBtn->setEnabled(false); // requires a selected user ID
+    ui.certifyBtn->setEnabled(isLocalKey && keyCanBeCertified && userCanSignUserIDs);
+    ui.webOfTrustBtn->setEnabled(isLocalKey);
+    ui.revokeCertificationsBtn->setEnabled(userCanSignUserIDs && isLocalKey);
+    ui.revokeUserIDBtn->setEnabled(false); // requires a selected user ID
+    ui.changeExpirationAction->setEnabled(canBeUsedForSecretKeyOperations(key));
+    ui.changePassphraseBtn->setEnabled(isSecretKeyStoredInKeyRing(key));
+    ui.genRevokeBtn->setEnabled(canBeUsedForSecretKeyOperations(key));
+
+    // update values of protocol-independent UI elements
+    ui.validFromField->setValue(Formatting::creationDateString(key), Formatting::accessibleCreationDate(key));
+    ui.expiresField->setValue(Formatting::expirationDateString(key, i18nc("Valid until:", "unlimited")),
+                              Formatting::accessibleExpirationDate(key));
+    ui.fingerprintField->setValue(Formatting::prettyID(key.primaryFingerprint()),
+                                  Formatting::accessibleHexID(key.primaryFingerprint()));
+    if (DeVSCompliance::isCompliant()) {
+        ui.complianceField->setValue(Kleo::Formatting::complianceStringForKey(key));
+    }
+}
+
+void CertificateDetailsWidget::Private::updateUserIDActions()
+{
+    const auto userIDs = selectedUserIDs(ui.userIDTable);
+    const auto singleUserID = userIDs.size() == 1 ? userIDs.front() : GpgME::UserID{};
+    const bool isPrimaryUserID = !singleUserID.isNull() && (ui.userIDTable->selectedItems().front() == ui.userIDTable->topLevelItem(0));
+    ui.setPrimaryUserIDBtn->setEnabled(!singleUserID.isNull() //
+                                       && !isPrimaryUserID //
+                                       && !Kleo::isRevokedOrExpired(singleUserID) //
+                                       && canBeUsedForSecretKeyOperations(key));
+    ui.revokeUserIDBtn->setEnabled(!singleUserID.isNull() && canCreateCertifications(key) && canRevokeUserID(singleUserID));
+}
+
+void CertificateDetailsWidget::Private::setUpUserIDTable()
+{
     ui.userIDTable->clear();
 
     QStringList headers = { i18n("Email"), i18n("Name"), i18n("Trust Level"), i18n("Tags") };
-    if (canRevokeUID) {
-        headers << QString();
-    }
     ui.userIDTable->setColumnCount(headers.count());
     ui.userIDTable->setColumnWidth(0, 200);
     ui.userIDTable->setColumnWidth(1, 200);
@@ -436,95 +531,141 @@ void CertificateDetailsWidget::Private::setupCommonProperties()
 
         auto pMail = Kleo::Formatting::prettyEMail(uid);
         auto pName = Kleo::Formatting::prettyName(uid);
-        if (!isOpenPGP && pMail.isEmpty() && !pName.isEmpty()) {
-            // S/MIME UserIDs are sometimes split, with one userID
-            // containing the name another the Mail, we merge these
-            // UID's into a single item.
-
-            if (i + 1 < uids.size()) {
-                pMail = Kleo::Formatting::prettyEMail(uids[i + 1]);
-                // skip next uid
-                ++i;
-            }
-        }
-
-        if (!isOpenPGP && pMail.isEmpty() && pName.isEmpty()) {
-            // S/MIME certificates sometimes contain urls where both
-            // name and mail is empty. In that case we print whatever
-            // the uid is as name.
-            //
-            // Can be ugly like (3:uri24:http://ca.intevation.org), but
-            // this is better then showing an empty entry.
-            pName = QString::fromLatin1(uid.id());
-        }
 
         item->setData(0, Qt::DisplayRole, pMail);
         item->setData(0, Qt::ToolTipRole, toolTip);
+        item->setData(0, Qt::AccessibleTextRole, pMail.isEmpty() ? i18nc("text for screen readers for an empty email address", "no email") : pMail);
         item->setData(1, Qt::DisplayRole, pName);
         item->setData(1, Qt::ToolTipRole, toolTip);
 
-        QIcon trustIcon;
-        if (updateInProgress) {
-           trustIcon = QIcon::fromTheme(QStringLiteral("emblem-question"));
-           item->setData(2, Qt::DisplayRole, i18n("Updating..."));
-        } else {
-            switch (uid.validity()) {
-            case GpgME::UserID::Unknown:
-            case GpgME::UserID::Undefined:
-                trustIcon = QIcon::fromTheme(QStringLiteral("emblem-question"));
-                break;
-            case GpgME::UserID::Never:
-                trustIcon = QIcon::fromTheme(QStringLiteral("emblem-error"));
-                break;
-            case GpgME::UserID::Marginal:
-                trustIcon = QIcon::fromTheme(QStringLiteral("emblem-warning"));
-                break;
-            case GpgME::UserID::Full:
-            case GpgME::UserID::Ultimate:
-                trustIcon = QIcon::fromTheme(QStringLiteral("emblem-success"));
-                break;
-            }
-            item->setData(2, Qt::DisplayRole, Kleo::Formatting::validityShort(uid));
-        }
-        item->setData(2, Qt::DecorationRole, trustIcon);
+        item->setData(2, Qt::DecorationRole, trustLevelIcon(uid));
+        item->setData(2, Qt::DisplayRole, trustLevelText(uid));
         item->setData(2, Qt::ToolTipRole, toolTip);
 
         GpgME::Error err;
         QStringList tagList;
-#ifdef GPGME_HAS_REMARKS
         for (const auto &tag: uid.remarks(Tags::tagKeys(), err)) {
             if (err) {
-                qCWarning(KLEOPATRA_LOG) << "Getting remarks for user id" << uid.id() << "failed:" << err;
+                qCWarning(KLEOPATRA_LOG) << "Getting remarks for user ID" << uid.id() << "failed:" << err;
             }
             tagList << QString::fromStdString(tag);
         }
         qCDebug(KLEOPATRA_LOG) << "tagList:" << tagList;
-#endif
         const auto tags = tagList.join(QStringLiteral("; "));
         item->setData(3, Qt::DisplayRole, tags);
         item->setData(3, Qt::ToolTipRole, toolTip);
 
         ui.userIDTable->addTopLevelItem(item);
-
-        if (canRevokeUID) {
-            auto button = new QPushButton;
-            button->setIcon(QIcon::fromTheme(QStringLiteral("entry-delete")));
-            button->setToolTip(i18n("Revoke this User ID"));
-            button->setMaximumWidth(32);
-            QObject::connect(button, &QPushButton::clicked,
-                            q, [this, uid]() { revokeUID(uid); });
-            ui.userIDTable->setItemWidget(item, 4, button);
-        }
     }
     if (!Tags::tagsEnabled()) {
         ui.userIDTable->hideColumn(3);
     }
 }
 
-void CertificateDetailsWidget::Private::revokeUID(const GpgME::UserID &uid)
+void CertificateDetailsWidget::Private::setUpSMIMEAdressList()
 {
-    Q_UNUSED(uid)
-    qCWarning(KLEOPATRA_LOG) << "Revoking UserID is not implemented. How did you even get here?!?!";
+    ui.smimeAddressList->clear();
+
+    const auto *const emailField = attributeField(QStringLiteral("EMAIL"));
+
+    // add email address from primary user ID if not listed already as attribute field
+    if (!emailField) {
+        const auto ownerId = key.userID(0);
+        const Kleo::DN dn(ownerId.id());
+        const QString dnEmail = dn[QStringLiteral("EMAIL")];
+        if (!dnEmail.isEmpty()) {
+            ui.smimeAddressList->addItem(dnEmail);
+        }
+    }
+
+    if (key.numUserIDs() > 1) {
+        // iterate over the secondary user IDs
+#ifdef USE_RANGES
+        for (const auto uids = key.userIDs(); const auto &uid : std::ranges::subrange(std::next(uids.begin()), uids.end())) {
+#else
+        const auto uids = key.userIDs();
+        for (auto it = std::next(uids.begin()); it != uids.end(); ++it) {
+            const auto &uid = *it;
+#endif
+            const auto name = Kleo::Formatting::prettyName(uid);
+            const auto email = Kleo::Formatting::prettyEMail(uid);
+            QString itemText;
+            if (name.isEmpty() && !email.isEmpty()) {
+                // skip email addresses already listed in email attribute field
+                if (emailField && email == emailField->value()) {
+                    continue;
+                }
+                itemText = email;
+            } else {
+                // S/MIME certificates sometimes contain urls where both
+                // name and mail is empty. In that case we print whatever
+                // the uid is as name.
+                //
+                // Can be ugly like (3:uri24:http://ca.intevation.org), but
+                // this is better then showing an empty entry.
+                itemText = QString::fromUtf8(uid.id());
+            }
+            // avoid duplicate entries in the list
+            if (ui.smimeAddressList->findItems(itemText, Qt::MatchExactly).empty()) {
+                ui.smimeAddressList->addItem(itemText);
+            }
+        }
+    }
+
+    if (ui.smimeAddressList->count() == 0) {
+        ui.smimeRelatedAddresses->setVisible(false);
+        ui.smimeAddressList->setVisible(false);
+    }
+}
+
+void CertificateDetailsWidget::Private::revokeUserID(const GpgME::UserID &userId)
+{
+    const QString message = xi18nc(
+        "@info",
+        "<para>Do you really want to revoke the user ID<nl/><emphasis>%1</emphasis> ?</para>",
+        QString::fromUtf8(userId.id()));
+    auto confirmButton = KStandardGuiItem::ok();
+    confirmButton.setText(i18nc("@action:button", "Revoke User ID"));
+    confirmButton.setToolTip({});
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    const auto choice = KMessageBox::questionTwoActions(
+#else
+    const auto choice = KMessageBox::questionYesNo(
+#endif
+        q->window(),
+        message,
+        i18nc("@title:window", "Confirm Revocation"),
+        confirmButton,
+        KStandardGuiItem::cancel(),
+        {},
+        KMessageBox::Notify | KMessageBox::WindowModal);
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    if (choice != KMessageBox::ButtonCode::PrimaryAction) {
+#else
+    if (choice != KMessageBox::Yes) {
+#endif
+        return;
+    }
+
+    auto cmd = new Commands::RevokeUserIDCommand(userId);
+    cmd->setParentWidget(q);
+    connect(cmd, &Command::finished, q, [this]() {
+        ui.userIDTable->setEnabled(true);
+        // the Revoke User ID button will be updated by the key update
+        updateKey();
+    });
+    ui.userIDTable->setEnabled(false);
+    ui.revokeUserIDBtn->setEnabled(false);
+    cmd->start();
+}
+
+void CertificateDetailsWidget::Private::revokeSelectedUserID()
+{
+    const auto userIDs = selectedUserIDs(ui.userIDTable);
+    if (userIDs.size() != 1) {
+        return;
+    }
+    revokeUserID(userIDs.front());
 }
 
 void CertificateDetailsWidget::Private::changeExpiration()
@@ -532,9 +673,9 @@ void CertificateDetailsWidget::Private::changeExpiration()
     auto cmd = new Kleo::Commands::ChangeExpiryCommand(key);
     QObject::connect(cmd, &Kleo::Commands::ChangeExpiryCommand::finished,
                      q, [this]() {
-                         ui.changeExpirationBtn->setEnabled(true);
+                         ui.changeExpirationAction->setEnabled(true);
                      });
-    ui.changeExpirationBtn->setEnabled(false);
+    ui.changeExpirationAction->setEnabled(false);
     cmd->start();
 }
 
@@ -560,14 +701,42 @@ void CertificateDetailsWidget::Private::genRevokeCert()
     cmd->start();
 }
 
-void CertificateDetailsWidget::Private::certifyClicked()
+void CertificateDetailsWidget::Private::refreshCertificate()
 {
-    auto cmd = new Kleo::Commands::CertifyCertificateCommand(key);
+    auto cmd = new Kleo::RefreshCertificateCommand{key};
+    QObject::connect(cmd, &Kleo::RefreshCertificateCommand::finished,
+                     q, [this]() {
+                         ui.refreshBtn->setEnabled(true);
+                     });
+    ui.refreshBtn->setEnabled(false);
+    cmd->start();
+}
+
+void CertificateDetailsWidget::Private::certifyUserIDs()
+{
+    const auto userIDs = selectedUserIDs(ui.userIDTable);
+    auto cmd = userIDs.empty() ? new Kleo::Commands::CertifyCertificateCommand{key} //
+                               : new Kleo::Commands::CertifyCertificateCommand{userIDs};
     QObject::connect(cmd, &Kleo::Commands::CertifyCertificateCommand::finished,
                      q, [this]() {
+                         updateKey();
                          ui.certifyBtn->setEnabled(true);
                      });
     ui.certifyBtn->setEnabled(false);
+    cmd->start();
+}
+
+void CertificateDetailsWidget::Private::revokeCertifications()
+{
+    const auto userIDs = selectedUserIDs(ui.userIDTable);
+    auto cmd = userIDs.empty() ? new Kleo::Commands::RevokeCertificationCommand{key} //
+                               : new Kleo::Commands::RevokeCertificationCommand{userIDs};
+    QObject::connect(cmd, &Kleo::Command::finished,
+                     q, [this]() {
+                         updateKey();
+                         ui.revokeCertificationsBtn->setEnabled(true);
+                     });
+    ui.revokeCertificationsBtn->setEnabled(false);
     cmd->start();
 }
 
@@ -591,17 +760,49 @@ void CertificateDetailsWidget::Private::addUserID()
     QObject::connect(cmd, &Kleo::Commands::AddUserIDCommand::finished,
                      q, [this]() {
                          ui.addUserIDBtn->setEnabled(true);
-                         key.update();
-                         q->setKey(key);
+                         updateKey();
                      });
     ui.addUserIDBtn->setEnabled(false);
     cmd->start();
+}
+
+void CertificateDetailsWidget::Private::setPrimaryUserID(const GpgME::UserID &uid)
+{
+    auto userId = uid;
+    if (userId.isNull()) {
+        const auto userIDs = selectedUserIDs(ui.userIDTable);
+        if (userIDs.size() != 1) {
+            return;
+        }
+        userId = userIDs.front();
+    }
+
+    auto cmd = new Kleo::Commands::SetPrimaryUserIDCommand(userId);
+    QObject::connect(cmd, &Kleo::Commands::SetPrimaryUserIDCommand::finished, q, [this]() {
+        ui.userIDTable->setEnabled(true);
+        // the Flag As Primary button will be updated by the key update
+        updateKey();
+    });
+    ui.userIDTable->setEnabled(false);
+    ui.setPrimaryUserIDBtn->setEnabled(false);
+    cmd->start();
+}
+
+namespace
+{
+void ensureThatKeyDetailsAreLoaded(GpgME::Key &key)
+{
+    if (key.userID(0).numSignatures() == 0) {
+        key.update();
+    }
+}
 }
 
 void CertificateDetailsWidget::Private::keysMayHaveChanged()
 {
     auto newKey = Kleo::KeyCache::instance()->findByFingerprint(key.primaryFingerprint());
     if (!newKey.isNull()) {
+        ensureThatKeyDetailsAreLoaded(newKey);
         setUpdatedKey(newKey);
     }
 }
@@ -613,49 +814,72 @@ void CertificateDetailsWidget::Private::showTrustChainDialog()
     dlg->exec();
 }
 
-void CertificateDetailsWidget::Private::publishCertificate()
-{
-    qCWarning(KLEOPATRA_LOG) << "publishCertificateis not implemented.";
-    //TODO
-}
-
 void CertificateDetailsWidget::Private::userIDTableContextMenuRequested(const QPoint &p)
 {
-    auto item = ui.userIDTable->itemAt(p);
-    if (!item) {
-        return;
-    }
-
-    const auto userID = item->data(0, Qt::UserRole).value<GpgME::UserID>();
+    const auto userIDs = selectedUserIDs(ui.userIDTable);
+    const auto singleUserID = (userIDs.size() == 1) ? userIDs.front() : GpgME::UserID{};
+#ifdef QGPGME_SUPPORTS_SET_PRIMARY_UID
+    const bool isPrimaryUserID = !singleUserID.isNull() && (ui.userIDTable->selectedItems().front() == ui.userIDTable->topLevelItem(0));
+#endif
+    const bool canSignUserIDs = userHasCertificationKey();
+    const auto isLocalKey = !isRemoteKey(key);
+    const auto keyCanBeCertified = Kleo::canBeCertified(key);
 
     auto menu = new QMenu(q);
-    menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-sign")),
-                    i18n("Certify..."),
-                    q, [this, userID]() {
-        auto cmd = new Kleo::Commands::CertifyCertificateCommand(userID);
-        ui.userIDTable->setEnabled(false);
-        connect(cmd, &Kleo::Commands::CertifyCertificateCommand::finished,
-                q, [this]() {
-            ui.userIDTable->setEnabled(true);
-            // Trigger an update when done
-            q->setKey(key);
-        });
-        cmd->start();
-    });
+#ifdef QGPGME_SUPPORTS_SET_PRIMARY_UID
+    if (key.hasSecret()) {
+        auto action = menu->addAction(QIcon::fromTheme(QStringLiteral("favorite")),
+                                      i18nc("@action:inmenu", "Flag as Primary User ID"),
+                                      q, [this, singleUserID]() {
+                                          setPrimaryUserID(singleUserID);
+                                      });
+        action->setEnabled(!singleUserID.isNull() //
+                           && !isPrimaryUserID //
+                           && !Kleo::isRevokedOrExpired(singleUserID) //
+                           && canBeUsedForSecretKeyOperations(key));
+    }
+#endif
+    {
+        const auto actionText = userIDs.empty() ? i18nc("@action:inmenu", "Certify User IDs...")
+                                                : i18ncp("@action:inmenu", "Certify User ID...", "Certify User IDs...", userIDs.size());
+        auto action = menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-sign")),
+                                      actionText,
+                                      q, [this]() {
+                                          certifyUserIDs();
+                                      });
+        action->setEnabled(isLocalKey && keyCanBeCertified && canSignUserIDs);
+    }
     if (Kleo::Commands::RevokeCertificationCommand::isSupported()) {
-        menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-revoke")),
-                        i18n("Revoke Certification..."),
-                        q, [this, userID]() {
-            auto cmd = new Kleo::Commands::RevokeCertificationCommand(userID);
+        const auto actionText = userIDs.empty() ? i18nc("@action:inmenu", "Revoke Certifications...")
+                                                : i18ncp("@action:inmenu", "Revoke Certification...", "Revoke Certifications...", userIDs.size());
+        auto action = menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-revoke")),
+                                      actionText,
+                                      q, [this]() {
+                                          revokeCertifications();
+                                      });
+        action->setEnabled(isLocalKey && canSignUserIDs);
+    }
+#ifdef MAILAKONADI_ENABLED
+    if (key.hasSecret()) {
+        auto action = menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-export")),
+                                      i18nc("@action:inmenu", "Publish at Mail Provider ..."),
+                                      q, [this, singleUserID]() {
+            auto cmd = new Kleo::Commands::ExportOpenPGPCertToProviderCommand(singleUserID);
             ui.userIDTable->setEnabled(false);
-            connect(cmd, &Kleo::Commands::RevokeCertificationCommand::finished,
-                    q, [this]() {
-                ui.userIDTable->setEnabled(true);
-                // Trigger an update when done
-                q->setKey(key);
-            });
+            connect(cmd, &Kleo::Commands::ExportOpenPGPCertToProviderCommand::finished,
+                    q, [this]() { ui.userIDTable->setEnabled(true); });
             cmd->start();
         });
+        action->setEnabled(!singleUserID.isNull());
+    }
+#endif // MAILAKONADI_ENABLED
+    {
+        auto action = menu->addAction(QIcon::fromTheme(QStringLiteral("view-certificate-revoke")),
+                                      i18nc("@action:inmenu", "Revoke User ID"),
+                                      q, [this, singleUserID]() {
+                                          revokeUserID(singleUserID);
+                                      });
+        action->setEnabled(!singleUserID.isNull() && canCreateCertifications(key) && canRevokeUserID(singleUserID));
     }
     connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
     menu->popup(ui.userIDTable->viewport()->mapToGlobal(p));
@@ -663,20 +887,15 @@ void CertificateDetailsWidget::Private::userIDTableContextMenuRequested(const QP
 
 void CertificateDetailsWidget::Private::showMoreDetails()
 {
-    ui.moreDetailsBtn->setEnabled(false);
     if (key.protocol() == GpgME::CMS) {
         auto cmd = new Kleo::Commands::DumpCertificateCommand(key);
-        connect(cmd, &Kleo::Commands::DumpCertificateCommand::finished,
-                q, [this]() {
-                    ui.moreDetailsBtn->setEnabled(true);
-                });
+        cmd->setParentWidget(q);
         cmd->setUseDialog(true);
         cmd->start();
     } else {
         QScopedPointer<SubKeysDialog> dlg(new SubKeysDialog(q));
         dlg->setKey(key);
         dlg->exec();
-        ui.moreDetailsBtn->setEnabled(true);
     }
 }
 
@@ -722,7 +941,31 @@ QString CertificateDetailsWidget::Private::tofuTooltipString(const GpgME::UserID
     return html;
 }
 
-#ifdef GPGMEPP_SUPPORTS_TRUST_SIGNATURES
+QIcon CertificateDetailsWidget::Private::trustLevelIcon(const GpgME::UserID &uid) const
+{
+    if (updateInProgress) {
+        return QIcon::fromTheme(QStringLiteral("emblem-question"));
+    }
+    switch (uid.validity()) {
+    case GpgME::UserID::Unknown:
+    case GpgME::UserID::Undefined:
+        return QIcon::fromTheme(QStringLiteral("emblem-question"));
+    case GpgME::UserID::Never:
+        return QIcon::fromTheme(QStringLiteral("emblem-error"));
+    case GpgME::UserID::Marginal:
+        return QIcon::fromTheme(QStringLiteral("emblem-warning"));
+    case GpgME::UserID::Full:
+    case GpgME::UserID::Ultimate:
+        return QIcon::fromTheme(QStringLiteral("emblem-success"));
+    }
+    return {};
+}
+
+QString CertificateDetailsWidget::Private::trustLevelText(const GpgME::UserID &uid) const
+{
+    return updateInProgress ? i18n("Updating...") : Formatting::validityShort(uid);
+}
+
 namespace
 {
 auto isGood(const GpgME::UserID::Signature &signature)
@@ -759,30 +1002,16 @@ auto accumulateTrustDomains(const std::vector<GpgME::UserID> &userIds)
     );
 }
 }
-#endif
 
 void CertificateDetailsWidget::Private::setupPGPProperties()
 {
-    HIDE_ROW(smimeOwner)
-    HIDE_ROW(smimeIssuer)
-    ui.smimeRelatedAddresses->setVisible(false);
-    ui.trustChainDetailsBtn->setVisible(false);
+    setUpUserIDTable();
 
-    ui.userIDTable->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(ui.userIDTable, &QAbstractItemView::customContextMenuRequested,
-            q, [this](const QPoint &p) { userIDTableContextMenuRequested(p); });
-
-#ifdef GPGMEPP_SUPPORTS_TRUST_SIGNATURES
     const auto trustDomains = accumulateTrustDomains(key.userIDs());
-    if (trustDomains.empty()) {
-        HIDE_ROW(trustedIntroducer)
-    } else {
-        SHOW_ROW(trustedIntroducer)
-        ui.trustedIntroducer->setText(QStringList(std::begin(trustDomains), std::end(trustDomains)).join(u", "));
-    }
-#else
-    HIDE_ROW(trustedIntroducer)
-#endif
+    ui.trustedIntroducerField->setVisible(!trustDomains.empty());
+    ui.trustedIntroducerField->setValue(QStringList(std::begin(trustDomains), std::end(trustDomains)).join(u", "));
+
+    ui.refreshBtn->setToolTip(i18nc("@info:tooltip", "Update the key from external sources."));
 }
 
 static QString formatDNToolTip(const Kleo::DN &dn)
@@ -811,52 +1040,48 @@ static QString formatDNToolTip(const Kleo::DN &dn)
 
 void CertificateDetailsWidget::Private::setupSMIMEProperties()
 {
-    HIDE_ROW(publishing)
-    HIDE_ROW(trustedIntroducer)
-
     const auto ownerId = key.userID(0);
     const Kleo::DN dn(ownerId.id());
-    const QString cn = dn[QStringLiteral("CN")];
-    const QString o = dn[QStringLiteral("O")];
-    const QString dnEmail = dn[QStringLiteral("EMAIL")];
-    const QString name = cn.isEmpty() ? dnEmail : cn;
 
-    QString owner;
-    if (name.isEmpty()) {
-        owner = dn.dn();
-    } else if (o.isEmpty()) {
-        owner = name;
-    } else {
-        owner = i18nc("<name> of <company>", "%1 of %2", name, o);
+    for (const auto &[attributeName, field] : ui.smimeAttributeFields) {
+        const QString attributeValue = dn[attributeName];
+        field->setValue(attributeValue);
+        field->setVisible(!attributeValue.isEmpty());
     }
-    ui.smimeOwner->setText(owner);
-    ui.smimeOwner->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    ui.smimeTrustLevelField->setIcon(trustLevelIcon(ownerId));
+    ui.smimeTrustLevelField->setValue(trustLevelText(ownerId));
 
     const Kleo::DN issuerDN(key.issuerName());
     const QString issuerCN = issuerDN[QStringLiteral("CN")];
     const QString issuer = issuerCN.isEmpty() ? QString::fromUtf8(key.issuerName()) : issuerCN;
-    ui.smimeIssuer->setText(QStringLiteral("<a href=\"#issuerDetails\">%1</a>").arg(issuer));
+    ui.smimeIssuerField->setValue(issuer);
+    ui.smimeIssuerField->setToolTip(formatDNToolTip(issuerDN));
+    ui.showIssuerCertificateAction->setEnabled(!key.isRoot());
 
-    ui.smimeIssuer->setToolTip(formatDNToolTip(issuerDN));
+    setUpSMIMEAdressList();
 
-    ui.smimeOwner->setToolTip(formatDNToolTip(dn));
-
+    ui.refreshBtn->setToolTip(i18nc("@info:tooltip", "Update the CRLs and do a full validation check of the certificate."));
 }
 
-void CertificateDetailsWidget::Private::smimeLinkActivated(const QString &link)
+void CertificateDetailsWidget::Private::showIssuerCertificate()
 {
-    if (link == QLatin1String("#issuerDetails")) {
-        const auto parentKey = KeyCache::instance()->findIssuers(key, KeyCache::NoOption);
+    // there is either one or no parent key
+    const auto parentKeys = KeyCache::instance()->findIssuers(key, KeyCache::NoOption);
 
-        if (!parentKey.size()) {
-            return;
-        }
-        auto cmd = new Kleo::Commands::DetailsCommand(parentKey[0], nullptr);
-        cmd->setParentWidget(q);
-        cmd->start();
+    if (parentKeys.empty()) {
+        KMessageBox::error(q, i18n("The issuer certificate could not be found locally."));
         return;
     }
-    qCWarning(KLEOPATRA_LOG) << "Unknown link activated:" << link;
+    auto cmd = new Kleo::Commands::DetailsCommand(parentKeys.front());
+    cmd->setParentWidget(q);
+    cmd->start();
+}
+
+void CertificateDetailsWidget::Private::copyFingerprintToClipboard()
+{
+    if (auto clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(QString::fromLatin1(key.primaryFingerprint()));
+    }
 }
 
 CertificateDetailsWidget::CertificateDetailsWidget(QWidget *parent)
@@ -880,6 +1105,12 @@ void CertificateDetailsWidget::Private::keyListDone(const GpgME::KeyListResult &
     // As we listen for keysmayhavechanged we get the update
     // after updating the keycache.
     KeyCache::mutableInstance()->insert(keys);
+}
+
+void CertificateDetailsWidget::Private::updateKey()
+{
+    key.update();
+    setUpdatedKey(key);
 }
 
 void CertificateDetailsWidget::Private::setUpdatedKey(const GpgME::Key &k)
@@ -910,21 +1141,15 @@ void CertificateDetailsWidget::setKey(const GpgME::Key &key)
     auto ctx = QGpgME::Job::context(job);
     ctx->addKeyListMode(GpgME::WithTofu);
     ctx->addKeyListMode(GpgME::SignatureNotations);
-#ifdef GPGME_HAS_WITH_SECRET
     if (key.hasSecret()) {
         ctx->addKeyListMode(GpgME::WithSecret);
     }
-#endif
 
     // Windows QGpgME new style connect problem makes this necessary.
     connect(job, SIGNAL(result(GpgME::KeyListResult,std::vector<GpgME::Key>,QString,GpgME::Error)),
             this, SLOT(keyListDone(GpgME::KeyListResult,std::vector<GpgME::Key>,QString,GpgME::Error)));
 
-#ifdef GPGME_HAS_WITH_SECRET
     job->start(QStringList() << QLatin1String(key.primaryFingerprint()));
-#else
-    job->start(QStringList() << QLatin1String(key.primaryFingerprint()), key.hasSecret());
-#endif
 }
 
 GpgME::Key CertificateDetailsWidget::key() const
@@ -933,3 +1158,4 @@ GpgME::Key CertificateDetailsWidget::key() const
 }
 
 #include "moc_certificatedetailswidget.cpp"
+

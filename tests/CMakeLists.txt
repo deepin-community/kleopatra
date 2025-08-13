@@ -1,10 +1,11 @@
+# SPDX-FileCopyrightText: none
+# SPDX-License-Identifier: BSD-3-Clause
 add_subdirectory(gnupg_home)
 
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR})
 include_directories(
   ${CMAKE_SOURCE_DIR}/src/
   ${CMAKE_BINARY_DIR}/src/
-  ${Boost_INCLUDE_DIRS}
   ${GPGME_INCLUDES}
 )
 
@@ -23,11 +24,17 @@ ecm_mark_as_test(test_verify)
 target_link_libraries(test_verify
   KF5::Libkleo
   Qt::Test
-  QGpgme
   KF5::CoreAddons
   KF5::I18n
   Qt::Widgets
 )
+
+if (QT_MAJOR_VERSION STREQUAL "6")
+    target_link_libraries(test_verify QGpgmeQt6)
+else()
+    target_link_libraries(test_verify QGpgme)
+endif()
+
 
 ########### next target ###############
 
@@ -37,8 +44,7 @@ if(USABLE_ASSUAN_FOUND)
 
   add_definitions(-DGPG_ERR_SOURCE_DEFAULT=GPG_ERR_SOURCE_USER_2)
 
-  set(test_uiserver_SRCS test_uiserver.cpp ${CMAKE_SOURCE_DIR}/src/utils/wsastarter.cpp
-                                           ${CMAKE_SOURCE_DIR}/src/utils/hex.cpp)
+  set(test_uiserver_SRCS test_uiserver.cpp ${CMAKE_SOURCE_DIR}/src/utils/wsastarter.cpp)
 
 #FIXME: omitting TEST makes test_uiserver print output again on a Win32 console;
 # find a better fix for this issue
@@ -64,15 +70,17 @@ if(USABLE_ASSUAN_FOUND)
   if(WIN32)
     target_link_libraries(test_uiserver
       ${ASSUAN_VANILLA_LIBRARIES}
-      QGpgme
       ws2_32
     )
   else()
     target_link_libraries(test_uiserver
       ${ASSUAN_PTHREAD_LIBRARIES}
-      QGpgme
   )
   endif()
-
+  if (QT_MAJOR_VERSION STREQUAL "6")
+      target_link_libraries(test_uiserver QGpgmeQt6)
+  else()
+      target_link_libraries(test_uiserver QGpgme)
+  endif()
 endif()
 

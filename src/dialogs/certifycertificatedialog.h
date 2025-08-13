@@ -27,7 +27,7 @@ class CertifyCertificateDialog : public QDialog
     Q_OBJECT
 public:
     explicit CertifyCertificateDialog(QWidget *parent = nullptr, Qt::WindowFlags f = {});
-    ~CertifyCertificateDialog();
+    ~CertifyCertificateDialog() override;
 
     bool exportableCertificationSelected() const;
 
@@ -37,7 +37,7 @@ public:
     bool nonRevocableCertificationSelected() const;
 
     void setSelectedUserIDs(const std::vector<GpgME::UserID> &uids);
-    std::vector<unsigned int> selectedUserIDs() const;
+    std::vector<GpgME::UserID> selectedUserIDs() const;
 
     GpgME::Key selectedSecretKey() const;
 
@@ -53,6 +53,9 @@ public:
 
 public Q_SLOTS:
     void accept() override;
+
+protected:
+    void keyPressEvent(QKeyEvent *) override;
 
 private:
     CertifyWidget *mCertWidget;

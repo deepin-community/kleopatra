@@ -41,7 +41,7 @@ class DecryptVerifyFilesCommand::Private : public Command::Private
 public:
     explicit Private(DecryptVerifyFilesCommand *qq, KeyListController *c,
                      bool forceManualMode=false);
-    ~Private();
+    ~Private() override;
 
     QStringList selectFiles() const;
 
@@ -82,9 +82,7 @@ DecryptVerifyFilesCommand::Private::Private(DecryptVerifyFilesCommand *qq, KeyLi
       shared_qq(qq, [](DecryptVerifyFilesCommand*){})
 {
     FileOperationsPreferences prefs;
-    if (!forceManualMode &&
-        GpgME::hasFeature(0, GpgME::BinaryAndFineGrainedIdentify) &&
-        prefs.autoDecryptVerify()) {
+    if (!forceManualMode && prefs.autoDecryptVerify()) {
         mController = new AutoDecryptVerifyFilesController();
     } else {
         mController = new DecryptVerifyFilesController();
@@ -127,8 +125,8 @@ DecryptVerifyFilesCommand::DecryptVerifyFilesCommand(const QStringList &files, Q
 void DecryptVerifyFilesCommand::Private::init()
 {
     mController->setExecutionContext(shared_qq);
-    connect(mController, SIGNAL(done()), q, SLOT(slotControllerDone()));
-    connect(mController, SIGNAL(error(int,QString)), q, SLOT(slotControllerError(int,QString)));
+    connect(mController, &Controller::done, q, [this]() { slotControllerDone(); });
+    connect(mController, &Controller::error, q, [this](int err, const QString &details) { slotControllerError(err, details); });
 }
 
 DecryptVerifyFilesCommand::~DecryptVerifyFilesCommand()

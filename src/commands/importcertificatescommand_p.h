@@ -3,6 +3,8 @@
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2007, 2008 Klarälvdalens Datakonsult AB
+    SPDX-FileCopyrightText: 2021, 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -12,14 +14,16 @@
 #include "command_p.h"
 #include "importcertificatescommand.h"
 
+#include <Libkleo/KeyGroup>
+
 #include <gpgme++/global.h>
+#include <gpgme++/importresult.h>
 
 #include <vector>
 #include <map>
 
 namespace GpgME
 {
-class ImportResult;
 class Import;
 class KeyListResult;
 class Error;
@@ -27,10 +31,60 @@ class Error;
 
 namespace QGpgME
 {
-class AbstractImportJob;
+class Job;
+}
+
+namespace Kleo
+{
+class KeyCacheAutoRefreshSuspension;
 }
 
 class QByteArray;
+class QProgressDialog;
+
+enum class ImportType
+{
+    Local,
+    External,
+};
+
+struct ImportJobData
+{
+    QString id;
+    GpgME::Protocol protocol;
+    ImportType type;
+    QGpgME::Job *job;
+    std::vector<QMetaObject::Connection> connections;
+};
+
+bool operator==(const ImportJobData &lhs, const ImportJobData &rhs);
+
+struct ImportResultData
+{
+    QString id;
+    GpgME::Protocol protocol;
+    ImportType type;
+    GpgME::ImportResult result;
+};
+
+struct ImportedGroup
+{
+    enum class Status
+    {
+        New,
+        Updated,
+    };
+    QString id;
+    Kleo::KeyGroup group;
+    Status status;
+};
+
+struct ImportOptions
+{
+    QString importFilter;
+    GpgME::Key::Origin keyOrigin = GpgME::Key::OriginUnknown;
+    QString keyOriginUrl;
+};
 
 class Kleo::ImportCertificatesCommand::Private : public Command::Private
 {
@@ -39,42 +93,63 @@ class Kleo::ImportCertificatesCommand::Private : public Command::Private
     {
         return static_cast<ImportCertificatesCommand *>(q);
     }
+
 public:
     explicit Private(ImportCertificatesCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     void setWaitForMoreJobs(bool waiting);
+    void setProgressWindowTitle(const QString &title);
+    void setProgressLabelText(const QString &text);
 
-    void startImport(GpgME::Protocol proto, const QByteArray &data, const QString &id = QString());
+    void startImport(GpgME::Protocol proto, const QByteArray &data, const QString &id = QString(), const ImportOptions &options = {});
     void startImport(GpgME::Protocol proto, const std::vector<GpgME::Key> &keys, const QString &id = QString());
-    void importResult(const GpgME::ImportResult &);
-    void importResult(const GpgME::ImportResult &, const QString &);
+    void startImport(GpgME::Protocol proto, const QStringList &keyIds, const QString &id = {});
+    void importResult(const GpgME::ImportResult &, QGpgME::Job *job = nullptr);
+    void importResult(const ImportResultData &result);
+
+    void importGroupsFromFile(const QString &filename);
 
     void showError(QWidget *parent, const GpgME::Error &error, const QString &id = QString());
     void showError(const GpgME::Error &error, const QString &id = QString());
 
-    void showDetails(QWidget *parent, const std::vector<GpgME::ImportResult> &results, const QStringList &ids);
-    void showDetails(const std::vector<GpgME::ImportResult> &results, const QStringList &ids);
-
-    void setImportResultProxyModel(const std::vector<GpgME::ImportResult> &results, const QStringList &ids);
+    void setImportResultProxyModel(const std::vector<ImportResultData> &results);
 
     bool showPleaseCertify(const GpgME::Import &imp);
 
     void keyListDone(const GpgME::KeyListResult &result,
                      const std::vector<GpgME::Key> &keys,
                      const QString &, const GpgME::Error&);
-private:
-    void handleExternalCMSImports();
-    void tryToFinish();
 
 private:
-    bool waitForMoreJobs;
-    bool containedExternalCMSCerts;
+    void showDetails(const std::vector<ImportResultData> &results,
+                     const std::vector<ImportedGroup> &groups);
+    void processResults();
+    void tryToFinish();
+    void keyCacheUpdated();
+    void importGroups();
+    std::set<QString> getMissingSignerKeyIds(const std::vector<ImportResultData> &results);
+    void importSignerKeys(const std::set<QString> &keyIds);
+
+    void setUpProgressDialog();
+    void increaseProgressMaximum();
+    void increaseProgressValue();
+    void setProgressToMaximum();
+
+private:
+    bool waitForMoreJobs = false;
+    bool importingSignerKeys = false;
     std::vector<GpgME::Protocol> nonWorkingProtocols;
-    std::map<QObject *, QString> idsByJob;
-    std::vector<QGpgME::AbstractImportJob *> jobs;
-    std::vector<GpgME::ImportResult> results;
-    QStringList ids;
+    std::vector<ImportJobData> jobs;
+    std::vector<QString> filesToImportGroupsFrom;
+    std::vector<ImportResultData> results;
+    std::vector<ImportedGroup> importedGroups;
+    std::shared_ptr<KeyCacheAutoRefreshSuspension> keyCacheAutoRefreshSuspension;
+    QMetaObject::Connection keyListConnection;
+
+    QString progressWindowTitle;
+    QString progressLabelText;
+    QPointer<QProgressDialog> progressDialog;
 };
 
 inline Kleo::ImportCertificatesCommand::Private *Kleo::ImportCertificatesCommand::d_func()

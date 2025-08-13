@@ -1,0 +1,840 @@
+Description: Update libassuan/libgpg-error cmake infrastructure
+ Use current upstream cmake modules located at
+ https://github.com/KDE/libkleo/tree/master/cmake/modules and update
+ CMakefiles by cherry-picking a17fc1b29d7c03a8b9e84f0e4b849fb9f2ebbc57
+ from upstream GIT master and adapting (minimal changes) to 22.12 series.
+Author: Andreas Metzler <ametzler@debian.org>
+Bug-Debian: https://bugs.debian.org/1072277
+Origin: vendor
+Origin: backport
+Bug: https://dev.gnupg.org/T6310
+Forwarded: not-needed
+Last-Update: 2024-08-21
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,10 +38,12 @@ set(LIBKLEO_VERSION "5.22.3")
+ set(QT_REQUIRED_VERSION "5.15.2")
+ if (QT_MAJOR_VERSION STREQUAL "6")
+     set(QT_REQUIRED_VERSION "6.4.0")
+ endif()
+ set(GPGME_REQUIRED_VERSION "1.16.0")
++set(LIBASSUAN_REQUIRED_VERSION "2.4.2")
++set(LIBGPGERROR_REQUIRED_VERSION "1.6")
+ 
+ if (WIN32)
+   set(KF5_WANT_VERSION "5.70.0")
+   set(KMIME_WANT_VERSION "5.12.0")
+ else ()
+@@ -139,12 +141,29 @@ find_package(KF5IdentityManagement ${KID
+ find_package(KF5MailTransport ${KMAILTRANSPORT_VERSION} CONFIG)
+ find_package(KF5MailTransportAkonadi ${KMAILTRANSPORT_VERSION} CONFIG)
+ 
+ find_package(Qt${QT_MAJOR_VERSION} ${QT_REQUIRED_VERSION} CONFIG REQUIRED Widgets Test Network PrintSupport)
+ 
+-find_package(Assuan2 REQUIRED)
+-
++find_package(LibAssuan ${LIBASSUAN_REQUIRED_VERSION} REQUIRED)
++set_package_properties(LibAssuan PROPERTIES
++  TYPE REQUIRED
++  PURPOSE "Needed for Kleopatra to act as the GnuPG UI Server"
++)
++# Minimize assuan cmake-update backport changes by providing old defines
++if (LibAssuan_FOUND)
++	set (HAVE_USABLE_ASSUAN 1)
++	set (HAVE_KLEOPATRACLIENT_LIBRARY 1)
++	set (HAVE_ASSUAN2 1)
++	OPTION( BUILD_libkleopatraclient "Build directory
++	kleopatra/libkleopatraclient" ON)
++endif (LibAssuan_FOUND)
++
++# 1.6 added GPG_ERR_SOURCE_KLEO
++find_package(LibGpgError ${LIBGPGERROR_REQUIRED_VERSION} REQUIRED)
++if (LibGpgError_FOUND)
++		set(HAVE_GPG_ERR_SOURCE_KLEO 1)
++endif (LibGpgError_FOUND)
+ 
+ set(kleopatra_release FALSE)
+ 
+ if(NOT kleopatra_release)
+     find_package(Git)
+@@ -169,19 +188,17 @@ if(NOT kleopatra_release)
+         endif()
+     endif()
+ endif()
+ 
+ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version-kleopatra.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/version-kleopatra.h)
+-
+-include (ConfigureChecks.cmake)
+-
+ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config-kleopatra.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-kleopatra.h)
++
+ include_directories(
+     ${CMAKE_CURRENT_BINARY_DIR}
+     ${CMAKE_CURRENT_SOURCE_DIR}
+-    ${ASSUAN2_INCLUDES}
+-    )
++    ${LibAssuan_INCLUDE_DIRS}
++)
+ 
+ add_definitions(-D_ASSUAN_ONLY_GPG_ERRORS)
+ if (WIN32)
+ # On Windows, we need to use stuff deprecated since Qt 5.11, e.g. from QDesktopWidget
+ ecm_set_disabled_deprecation_versions(QT 5.10.0 KF 5.99.0)
+--- a/cmake/modules/FindAssuan2.cmake
++++ /dev/null
+@@ -1,251 +0,0 @@
+-# - Try :to find the assuan v2 library
+-
+-# Variables set:
+-#  ASSUAN2_{INCLUDES,FOUND,LIBRARIES} will be set for each of the above
+-
+-#if this is built-in, please replace, if it isn't, export into a MacroToBool.cmake of it's own
+-macro( macro_bool_to_bool FOUND_VAR )
+-  foreach( _current_VAR ${ARGN} )
+-    if ( ${FOUND_VAR} )
+-      set( ${_current_VAR} TRUE )
+-    else()
+-      set( ${_current_VAR} FALSE )
+-    endif()
+-  endforeach()
+-endmacro()
+-
+-if ( WIN32 )
+-
+-  # On Windows, we don't have a libassuan-config script, so we need to
+-  # look for the stuff ourselves:
+-
+-  # in cmake, AND and OR have the same precedence, there's no
+-  # subexpressions, and expressions are evaluated short-circuit'ed
+-  # IOW: CMake if() suxx.
+-  set( _seem_to_have_cached_assuan2 false )
+-  if ( ASSUAN2_INCLUDES )
+-    if ( ASSUAN2_VANILLA_LIBRARIES )#OR ASSUAN2_QT_LIBRARIES OR ASSUAN2_GLIB_LIBRARIES )
+-      set( _seem_to_have_cached_assuan2 true )
+-    endif()
+-  endif()
+-
+-  if ( _seem_to_have_cached_assuan2 )
+-
+-    macro_bool_to_bool( ASSUAN2_VANILLA_LIBRARIES  ASSUAN2_VANILLA_FOUND )
+-    # this would have been preferred:
+-    #set( ASSUAN2_*_FOUND macro_bool_to_bool(ASSUAN2_*_LIBRARIES) )
+-
+-    if ( ASSUAN2_VANILLA_FOUND ) #OR ASSUAN2_GLIB_FOUND OR ASSUAN2_QT_FOUND )
+-      set( ASSUAN2_FOUND true )
+-    else()
+-      set( ASSUAN2_FOUND false )
+-    endif()
+-
+-  else()
+-
+-    set( ASSUAN2_FOUND         false )
+-    set( ASSUAN2_VANILLA_FOUND false )
+-    #set( ASSUAN2_GLIB_FOUND    false )
+-    #set( ASSUAN2_QT_FOUND      false )
+-
+-    find_path( ASSUAN2_INCLUDES assuan.h
+-      ${CMAKE_INCLUDE_PATH}
+-      ${CMAKE_INSTALL_PREFIX}/include
+-    )
+-
+-    find_library( _assuan2_library NAMES assuan2 libassuan2 assuan libassuan assuan-0 libassuan-0 #sic!
+-      PATHS
+-        ${CMAKE_LIBRARY_PATH}
+-        ${CMAKE_INSTALL_PREFIX}/lib
+-    )
+-
+-    find_library( _gpg_error_library     NAMES gpg-error libgpg-error gpg-error-0 libgpg-error-0
+-      PATHS
+-        ${CMAKE_LIBRARY_PATH}
+-        ${CMAKE_INSTALL_PREFIX}/lib
+-    )
+-
+-    set( ASSUAN2_INCLUDES ${ASSUAN2_INCLUDES} )
+-
+-    if ( _assuan2_library AND _gpg_error_library )
+-      set( ASSUAN2_LIBRARIES ${_assuan2_library} ${_gpg_error_library} ws2_32 )
+-      set( ASSUAN2_FOUND             true )
+-    endif()
+-
+-  endif()
+-
+-  if (ASSUAN2_FOUND)
+-    set (HAVE_ASSUAN2 1)
+-  else()
+-    set (HAVE_ASSUAN2 0)
+-  endif()
+-
+-else() # not WIN32
+-
+-  # On *nix, we have the libassuan-config script which can tell us all we
+-  # need to know:
+-
+-  # see WIN32 case for an explanation of what this does:
+-  set( _seem_to_have_cached_assuan2 false )
+-  if ( ASSUAN2_INCLUDES AND ASSUAN2_LIBRARIES )
+-    set( _seem_to_have_cached_assuan2 true )
+-  endif()
+-
+-  if ( _seem_to_have_cached_assuan2 )
+-
+-    set( ASSUAN2_FOUND true )
+-
+-  else()
+-
+-    set( ASSUAN2_FOUND         false )
+-
+-    find_program( _ASSUAN2CONFIG_EXECUTABLE NAMES libassuan-config )
+-
+-    # if libassuan-config has been found
+-    if ( _ASSUAN2CONFIG_EXECUTABLE )
+-
+-      message( STATUS "Found libassuan-config at ${_ASSUAN2CONFIG_EXECUTABLE}" )
+-
+-      exec_program( ${_ASSUAN2CONFIG_EXECUTABLE} ARGS --version OUTPUT_VARIABLE ASSUAN2_VERSION )
+-
+-      set( _ASSUAN2_MIN_VERSION "2.0.0" )
+-      if( ASSUAN2_VERSION VERSION_GREATER ${_ASSUAN2_MIN_VERSION} )
+-        set( _ASSUAN2_INSTALLED_VERSION_OK TRUE )
+-      endif()
+-
+-      if ( NOT _ASSUAN2_INSTALLED_VERSION_OK )
+-
+-        message( STATUS "The installed version of assuan is too old: ${ASSUAN2_VERSION} (required: >= ${_ASSUAN2_MIN_VERSION})" )
+-
+-      else()
+-
+-        message( STATUS "Found assuan v${ASSUAN2_VERSION}" )
+-
+-        exec_program( ${_ASSUAN2CONFIG_EXECUTABLE} ARGS --libs OUTPUT_VARIABLE _assuan2_config_libs RETURN_VALUE _ret )
+-	if ( _ret )
+-	  set( _assuan2_config_libs )
+-	endif()
+-
+-        # append -lgpg-error to the list of libraries, if necessary
+-        if ( _assuan2_config_libs AND NOT _assuan2_config_libs MATCHES "lgpg-error" )
+-          set( _assuan2_config_libs "${_assuan2_config_libs} -lgpg-error" )
+-        endif()
+-
+-        if ( _assuan2_config_libs )
+-
+-          exec_program( ${_ASSUAN2CONFIG_EXECUTABLE} ARGS --cflags OUTPUT_VARIABLE _ASSUAN2_CFLAGS )
+-
+-          if ( _ASSUAN2_CFLAGS )
+-            string( REGEX REPLACE "(\r?\n)+$" " " _ASSUAN2_CFLAGS  "${_ASSUAN2_CFLAGS}" )
+-            string( REGEX REPLACE " *-I"      ";" ASSUAN2_INCLUDES "${_ASSUAN2_CFLAGS}" )
+-          endif()
+-
+-          if ( _assuan2_config_libs )
+-
+-            set( _assuan2_library_dirs )
+-            set( _assuan2_library_names )
+-
+-            string( REGEX REPLACE " +" ";" _assuan2_config_libs "${_assuan2_config_libs}" )
+-
+-            foreach( _flag ${_assuan2_config_libs} )
+-              if ( "${_flag}" MATCHES "^-L" )
+-                string( REGEX REPLACE "^-L" "" _dir "${_flag}" )
+-                file( TO_CMAKE_PATH "${_dir}" _dir )
+-                set( _assuan2_library_dirs ${_assuan2_library_dirs} "${_dir}" )
+-              elseif( "${_flag}" MATCHES "^-l" )
+-                string( REGEX REPLACE "^-l" "" _name "${_flag}" )
+-                set( _assuan2_library_names ${_assuan2_library_names} "${_name}" )
+-              endif()
+-            endforeach()
+-
+-            set( ASSUAN2_FOUND true )
+-
+-            foreach( _name ${_assuan2_library_names} )
+-              set( _assuan2_${_name}_lib )
+-
+-              # if -L options were given, look only there
+-              if ( _assuan2_library_dirs )
+-                find_library( _assuan2_${_name}_lib NAMES ${_name} PATHS ${_assuan2_library_dirs} NO_DEFAULT_PATH )
+-              endif()
+-
+-              # if not found there, look in system directories
+-              if ( NOT _assuan2_${_name}_lib )
+-                find_library( _assuan2_${_name}_lib NAMES ${_name} )
+-              endif()
+-
+-              # if still not found, then the whole flavour isn't found
+-              if ( NOT _assuan2_${_name}_lib )
+-                if ( ASSUAN2_FOUND )
+-                  set( ASSUAN2_FOUND false )
+-                  set( _not_found_reason "dependent library ${_name} wasn't found" )
+-                endif()
+-              endif()
+-
+-              set( ASSUAN2_LIBRARIES ${ASSUAN2_LIBRARIES} "${_assuan2_${_name}_lib}" )
+-            endforeach()
+-
+-            #check_c_library_exists_explicit( assuan         assuan_check_version "${_ASSUAN2_CFLAGS}" "${ASSUAN2_LIBRARIES}"         ASSUAN2_FOUND         )
+-            if ( ASSUAN2_FOUND )
+-              message( STATUS " Checking whether assuan is usable...yes" )
+-            else()
+-              message( STATUS " Checking whether assuan is usable...no" )
+-              message( STATUS "  (${_not_found_reason})" )
+-            endif()
+-          endif()
+-
+-          # ensure that they are cached
+-          set( ASSUAN2_INCLUDES  ${ASSUAN2_INCLUDES}  )
+-          set( ASSUAN2_LIBRARIES ${ASSUAN2_LIBRARIES} )
+-
+-        endif()
+-
+-      endif()
+-
+-    endif()
+-
+-  endif()
+-
+-  if (ASSUAN2_FOUND)
+-    set (HAVE_ASSUAN2 1)
+-  else()
+-    set (HAVE_ASSUAN2 0)
+-  endif()
+-
+-endif() # WIN32 | Unix
+-
+-
+-if ( NOT Assuan2_FIND_QUIETLY )
+-
+-  if ( ASSUAN2_FOUND )
+-    message( STATUS "Usable assuan found." )
+-    message( STATUS " Includes:  ${ASSUAN2_INCLUDES}" )
+-    message( STATUS " Libraries: ${ASSUAN2_LIBRARIES}" )
+-  else()
+-    message( STATUS "No usable assuan found." )
+-  endif()
+-
+-  if( Assuan2_FIND_REQUIRED )
+-    set( _ASSUAN2_TYPE "REQUIRED" )
+-  else()
+-    set( _ASSUAN2_TYPE "OPTIONAL" )
+-  endif()
+-
+-  if ( WIN32 )
+-    set( _assuan2_homepage "https://www.gpg4win.org" )
+-  else()
+-    set( _assuan2_homepage "https://www.gnupg.org/related_software/libassuan" )
+-  endif()
+-
+-  set_package_properties(ASSUAN2 PROPERTIES DESCRIPTION "Assuan v2 IPC library"
+-                         URL ${_assuan2_homepage}
+-                         TYPE ${_ASSUAN2_TYPE}
+-                         PURPOSE "Needed for Kleopatra to act as the GnuPG UI Server"
+-  )
+-
+-else()
+-
+-  if ( Assuan2_FIND_REQUIRED AND NOT ASSUAN2_FOUND )
+-    message( FATAL_ERROR "Assuan2 is required but was not found." )
+-  endif()
+-
+-endif()
+--- /dev/null
++++ b/cmake/modules/FindLibAssuan.cmake
+@@ -0,0 +1,106 @@
++# SPDX-FileCopyrightText: 2022 g10 Code GmbH
++# SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
++#
++# SPDX-License-Identifier: BSD-3-Clause
++
++#[=======================================================================[.rst:
++FindLibAssuan
++-------------
++
++Try to find the Libassuan library.
++
++This will define the following variables:
++
++``LibAssuan_FOUND``
++    True if (the requested version of) Libassuan was found
++``LibAssuan_VERSION``
++    The version of the Libassuan library which was found
++``LibAssuan_LIBRARIES``
++    Libraries you need to link when using Libassuan. This can be passed to
++    target_link_libraries() instead of the ``LibAssuan::LibAssuan`` target.
++``LibAssuan_INCLUDE_DIRS``
++    Include directories needed to use Libassuan. This should be passed to
++    target_include_directories() if the target is not used for linking.
++``LibAssuan_DEFINITIONS``
++    Compile definitions to use when compiling code that uses Libassuan.
++    This should be passed to target_compile_options() if the target is not
++    used for linking.
++
++If ``LibAssuan_FOUND`` is TRUE, it will also define the following imported target:
++
++``LibAssuan::LibAssuan``
++    The Libassuan library
++
++#]=======================================================================]
++
++find_package(PkgConfig QUIET)
++pkg_check_modules(PC_LibAssuan QUIET libassuan)
++
++set(LibAssuan_VERSION ${PC_LibAssuan_VERSION})
++set(LibAssuan_DEFINITIONS ${PC_LibAssuan_CFLAGS_OTHER})
++
++find_path(LibAssuan_INCLUDE_DIR
++    NAMES
++        assuan.h
++    PATHS
++        ${PC_LibAssuan_INCLUDE_DIRS}
++)
++find_library(LibAssuan_LIBRARY
++    NAMES
++        assuan
++    PATHS
++        ${PC_LibAssuan_LIBRARY_DIRS}
++)
++
++if(WIN32)
++    set(_LibAssuan_ADDITIONAL_LIBRARIES ws2_32)
++endif()
++
++if(LibAssuan_INCLUDE_DIR AND NOT LibAssuan_VERSION)
++    # The version is given in the format MAJOR.MINOR.PATCH optionally followed
++    # by an intermediate "beta" version given as -betaNUM, e.g. "2.5.6-beta38".
++    file(STRINGS "${LibAssuan_INCLUDE_DIR}/assuan.h" LibAssuan_VERSION_STR
++         REGEX "^#[\t ]*define[\t ]+ASSUAN_VERSION[\t ]+\"([0-9])+\\.([0-9])+\\.([0-9])+(-[a-z0-9]*)?\".*")
++    string(REGEX REPLACE "^.*ASSUAN_VERSION[\t ]+\"([0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9]*)?)\".*$"
++           "\\1" LibAssuan_VERSION_STR "${LibAssuan_VERSION_STR}")
++
++    set(LibAssuan_VERSION "${LibAssuan_VERSION_STR}")
++
++    unset(LibAssuan_VERSION_STR)
++endif()
++
++include(FindPackageHandleStandardArgs)
++find_package_handle_standard_args(LibAssuan
++    REQUIRED_VARS
++        LibAssuan_LIBRARY
++        LibAssuan_INCLUDE_DIR
++        LibAssuan_VERSION
++    VERSION_VAR
++        LibAssuan_VERSION
++)
++
++if(LibAssuan_FOUND AND NOT TARGET LibAssuan::LibAssuan)
++    add_library(LibAssuan::LibAssuan UNKNOWN IMPORTED)
++    set_target_properties(LibAssuan::LibAssuan PROPERTIES
++        IMPORTED_LOCATION "${LibAssuan_LIBRARY}"
++        INTERFACE_COMPILE_OPTIONS "${LibAssuan_DEFINITIONS}"
++        INTERFACE_INCLUDE_DIRECTORIES "${LibAssuan_INCLUDE_DIR}"
++    )
++    set_property(TARGET LibAssuan::LibAssuan APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${_LibAssuan_ADDITIONAL_LIBRARIES})
++endif()
++
++mark_as_advanced(
++    LibAssuan_INCLUDE_DIR
++    LibAssuan_LIBRARY
++)
++
++if(LibAssuan_FOUND)
++    set(LibAssuan_LIBRARIES ${LibAssuan_LIBRARY} ${_LibAssuan_ADDITIONAL_LIBRARIES})
++    set(LibAssuan_INCLUDE_DIRS ${LibAssuan_INCLUDE_DIR})
++endif()
++
++include(FeatureSummary)
++set_package_properties(LibAssuan PROPERTIES
++    DESCRIPTION "IPC library for the GnuPG components"
++    URL https://www.gnupg.org/software/libassuan
++)
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -45,21 +45,12 @@ set(_kleopatra_uiserver_SRCS
+     uiserver/signencryptfilescommand.cpp
+     uiserver/uiserver.cpp
+     uiserver/verifychecksumscommand.cpp
+   )
+ 
+-if(ASSUAN2_FOUND)
+-  include_directories(${ASSUAN2_INCLUDES})
+-  set(_kleopatra_uiserver_extra_libs ${ASSUAN2_LIBRARIES})
+-else()
+-  include_directories(${ASSUAN_INCLUDES})
+-  if(WIN32)
+-    set(_kleopatra_uiserver_extra_libs ${ASSUAN_VANILLA_LIBRARIES})
+-  else()
+-    set(_kleopatra_uiserver_extra_libs ${ASSUAN_PTHREAD_LIBRARIES})
+-  endif()
+-endif()
++include_directories(${LibAssuan_INCLUDE_DIRS})
++set(_kleopatra_uiserver_extra_libs ${LibAssuan_LIBRARIES})
+ 
+ if(HAVE_GPG_ERR_SOURCE_KLEO)
+   add_definitions(-DGPG_ERR_SOURCE_DEFAULT=GPG_ERR_SOURCE_KLEO)
+   add_definitions(-DGPGMEPP_ERR_SOURCE_DEFAULT=GPG_ERR_SOURCE_KLEO)
+ else()
+--- a/src/libkleopatraclient/core/CMakeLists.txt
++++ b/src/libkleopatraclient/core/CMakeLists.txt
+@@ -42,36 +42,9 @@ set_target_properties(kleopatraclientcor
+ if (COMPILE_WITH_UNITY_CMAKE_SUPPORT)
+     set_target_properties(kleopatraclientcore PROPERTIES UNITY_BUILD ON)
+ endif()
+ 
+ 
+-if(WIN32)
+-  if(ASSUAN2_FOUND)
+-    target_link_libraries(kleopatraclientcore
+-      
+-      ${ASSUAN2_LIBRARIES}
+-      ws2_32
+-    )
+-  else()
+-    target_link_libraries(kleopatraclientcore
+-      
+-      ${ASSUAN_VANILLA_LIBRARIES}
+-      ws2_32
+-    )
+-  endif()
+-else()
+-  if(ASSUAN2_FOUND)
+-    target_link_libraries(kleopatraclientcore
+-      
+-      ${ASSUAN2_LIBRARIES}
+-    )
+-  else()
+-    target_link_libraries(kleopatraclientcore
+-      
+-      ${ASSUAN_PTHREAD_LIBRARIES}
+-    )
+-  endif()
+-endif()
+-
+-target_link_libraries(kleopatraclientcore Qt::Widgets KF5::I18n Gpgmepp)
++target_link_libraries(kleopatraclientcore ${LibAssuan_LIBRARIES}
++	${LibGpgError_LIBRARIES} Qt::Widgets KF5::I18n Gpgmepp)
+ 
+ install(TARGETS kleopatraclientcore ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -51,34 +51,12 @@ if(USABLE_ASSUAN_FOUND)
+   if(WIN32)
+     add_executable(test_uiserver ${test_uiserver_SRCS})
+   else()
+     add_executable(test_uiserver ${test_uiserver_SRCS})
+   endif()
+-  target_link_libraries(test_uiserver KF5::I18n)
++  target_link_libraries(test_uiserver KF5::I18 KF5::Libkleon ${LibAssuan_LIBRARIES})
+ 
+-  if(ASSUAN2_FOUND)
+-    target_link_libraries(test_uiserver
+-      KF5::Libkleo
+-      ${ASSUAN2_LIBRARIES}
+-    )
+-  else()
+-    target_link_libraries(test_uiserver
+-      KF5::Libkleo
+-      ${ASSUAN_LIBRARIES}
+-    )
+-  endif()
+-
+-  if(WIN32)
+-    target_link_libraries(test_uiserver
+-      ${ASSUAN_VANILLA_LIBRARIES}
+-      ws2_32
+-    )
+-  else()
+-    target_link_libraries(test_uiserver
+-      ${ASSUAN_PTHREAD_LIBRARIES}
+-  )
+-  endif()
+   if (QT_MAJOR_VERSION STREQUAL "6")
+       target_link_libraries(test_uiserver QGpgmeQt6)
+   else()
+       target_link_libraries(test_uiserver QGpgme)
+   endif()
+--- /dev/null
++++ b/cmake/modules/FindLibGpgError.cmake
+@@ -0,0 +1,101 @@
++# SPDX-FileCopyrightText: 2022 g10 Code GmbH
++# SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
++#
++# SPDX-License-Identifier: BSD-3-Clause
++
++#[=======================================================================[.rst:
++FindLibGpgError
++---------------
++
++Try to find the Libgpg-error library.
++
++This will define the following variables:
++
++``LibGpgError_FOUND``
++    True if (the requested version of) Libgpg-error was found
++``LibGpgError_VERSION``
++    The version of the Libgpg-error library which was found
++``LibGpgError_LIBRARIES``
++    Libraries you need to link when using Libgpg-error This can be passed to
++    target_link_libraries() instead of the ``LibGpgError::LibGpgError`` target.
++``LibGpgError_INCLUDE_DIRS``
++    Include directories needed to use Libgpg-error This should be passed to
++    target_include_directories() if the target is not used for linking.
++``LibGpgError_DEFINITIONS``
++    Compile definitions to use when compiling code that uses Libgpg-error
++    This should be passed to target_compile_options() if the target is not
++    used for linking.
++
++If ``LibGpgError_FOUND`` is TRUE, it will also define the following imported target:
++
++``LibGpgError::LibGpgError``
++    The Libgpg-error library
++
++#]=======================================================================]
++
++find_package(PkgConfig QUIET)
++pkg_check_modules(PC_LibGpgError QUIET gpg-error)
++
++set(LibGpgError_VERSION ${PC_LibGpgError_VERSION})
++set(LibGpgError_DEFINITIONS ${PC_LibGpgError_CFLAGS_OTHER})
++
++find_path(LibGpgError_INCLUDE_DIR
++    NAMES
++        gpg-error.h
++    PATHS
++        ${PC_LibGpgError_INCLUDE_DIRS}
++)
++find_library(LibGpgError_LIBRARY
++    NAMES
++        gpg-error
++    PATHS
++        ${PC_LibGpgError_LIBRARY_DIRS}
++)
++
++if(LibGpgError_INCLUDE_DIR AND NOT LibGpgError_VERSION)
++    # The version is given in the format MAJOR.MINOR optionally followed
++    # by an intermediate "beta" version given as -betaNUM, e.g. "1.47-beta7".
++    file(STRINGS "${LibGpgError_INCLUDE_DIR}/gpg-error.h" LibGpgError_VERSION_STR
++         REGEX "^#[\t ]*define[\t ]+GPG_ERROR_VERSION[\t ]+\"([0-9])+\\.([0-9])+(-[a-z0-9]*)?\".*")
++    string(REGEX REPLACE "^.*GPG_ERROR_VERSION[\t ]+\"([0-9]+\\.[0-9]+(-[a-z0-9]*)?)\".*$"
++           "\\1" LibGpgError_VERSION_STR "${LibGpgError_VERSION_STR}")
++
++    set(LibGpgError_VERSION "${LibGpgError_VERSION_STR}")
++
++    unset(LibGpgError_VERSION_STR)
++endif()
++
++include(FindPackageHandleStandardArgs)
++find_package_handle_standard_args(LibGpgError
++    REQUIRED_VARS
++        LibGpgError_LIBRARY
++        LibGpgError_INCLUDE_DIR
++        LibGpgError_VERSION
++    VERSION_VAR
++        LibGpgError_VERSION
++)
++
++if(LibGpgError_FOUND AND NOT TARGET LibGpgError::LibGpgError)
++    add_library(LibGpgError::LibGpgError UNKNOWN IMPORTED)
++    set_target_properties(LibGpgError::LibGpgError PROPERTIES
++        IMPORTED_LOCATION "${LibGpgError_LIBRARY}"
++        INTERFACE_COMPILE_OPTIONS "${LibGpgError_DEFINITIONS}"
++        INTERFACE_INCLUDE_DIRECTORIES "${LibGpgError_INCLUDE_DIR}"
++    )
++endif()
++
++mark_as_advanced(
++    LibGpgError_INCLUDE_DIR
++    LibGpgError_LIBRARY
++)
++
++if(LibGpgError_FOUND)
++    set(LibGpgError_LIBRARIES ${LibGpgError_LIBRARY})
++    set(LibGpgError_INCLUDE_DIRS ${LibGpgError_INCLUDE_DIR})
++endif()
++
++include(FeatureSummary)
++set_package_properties(LibGpgError PROPERTIES
++    DESCRIPTION "Runtime library for all GnuPG components"
++    URL https://www.gnupg.org/software/libgpg-error
++)
+--- a/ConfigureChecks.cmake
++++ /dev/null
+@@ -1,182 +0,0 @@
+-# assuan configure checks
+-include(CheckFunctionExists)
+-
+-if ( ASSUAN2_FOUND )
+-  set ( ASSUAN_SUFFIX "2" )
+-else ( ASSUAN2_FOUND )
+-  # TODO Clean this up with assuan 2 as hard dependency.
+-  message(FATAL_ERROR "At least version 2 of libassuan is required for Kleopatra.")
+-endif ( ASSUAN2_FOUND )
+-
+-set( USABLE_ASSUAN_FOUND false )
+-
+-if ( ASSUAN${ASSUAN_SUFFIX}_FOUND )
+-
+-  set( CMAKE_REQUIRED_INCLUDES ${ASSUAN${ASSUAN_SUFFIX}_INCLUDES} )
+-
+-  if ( ASSUAN2_FOUND )
+-    set( CMAKE_REQUIRED_LIBRARIES ${ASSUAN2_LIBRARIES} )
+-    set( USABLE_ASSUAN_FOUND true )
+-  elseif ( WIN32 AND ASSUAN_VANILLA_FOUND )
+-    set( CMAKE_REQUIRED_LIBRARIES ${ASSUAN_VANILLA_LIBRARIES} )
+-    set( USABLE_ASSUAN_FOUND true )
+-  elseif( NOT WIN32 AND ASSUAN_PTHREAD_FOUND )
+-    set( CMAKE_REQUIRED_LIBRARIES ${ASSUAN_PTHREAD_LIBRARIES} )
+-    set( USABLE_ASSUAN_FOUND true )
+-  endif( ASSUAN2_FOUND )
+-
+-  # TODO: this workaround will be removed as soon as we find better solution
+-  if(MINGW)
+-    set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${KDEWIN32_INCLUDE_DIR}/mingw)
+-  elseif(MSVC)
+-    set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${KDEWIN32_INCLUDE_DIR}/msvc)
+-  endif(MINGW)
+-
+-endif( ASSUAN${ASSUAN_SUFFIX}_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND )
+-  # check if assuan.h can be compiled standalone (it couldn't, on
+-  # Windows, until recently, because of a HAVE_W32_SYSTEM #ifdef in
+-  # there)
+-  check_cxx_source_compiles( "
+-       #include <assuan.h>
+-       int main() {
+-           return 1;
+-       }
+-       "
+-       USABLE_ASSUAN_FOUND )
+-endif( USABLE_ASSUAN_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND )
+-
+-  # check whether assuan and gpgme may be linked to simultaneously
+-  check_function_exists( "assuan_get_pointer" USABLE_ASSUAN_FOUND )
+-
+-endif( USABLE_ASSUAN_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND AND NOT ASSUAN2_FOUND )
+-
+-  # check if assuan has assuan_fd_t
+-  check_cxx_source_compiles("
+-        #include <assuan.h>
+-        int main() {
+-            assuan_fd_t fd = ASSUAN_INVALID_FD;
+-            return fd ? 1 : 0 ;
+-        }
+-        "
+-    HAVE_ASSUAN_FD_T )
+-
+-  if ( WIN32 AND NOT HAVE_ASSUAN_FD_T )
+-    set( USABLE_ASSUAN_FOUND false )
+-  endif ( WIN32 AND NOT HAVE_ASSUAN_FD_T )
+-
+-  # check if assuan has assuan_inquire_ext, old style
+-  check_function_exists( "assuan_inquire_ext" HAVE_ASSUAN_INQUIRE_EXT )
+-
+-  if ( NOT HAVE_ASSUAN_INQUIRE_EXT )
+-    set( USABLE_ASSUAN_FOUND false )
+-  endif( NOT HAVE_ASSUAN_INQUIRE_EXT )
+-
+-  # check if assuan has new-style assuan_inquire_ext:
+-  check_cxx_source_compiles("
+-        #include <assuan.h>
+-        static int handler( void *, int, unsigned char*, size_t ) { return 0; }
+-        int main() {
+-            assuan_context_t ctx = 0;
+-            const size_t maxSize = 0U;
+-            assuan_error_t err = assuan_inquire_ext( ctx, \"FOO\", maxSize, handler, (void*)0 );
+-            return err ? 1 : 0 ;
+-        }
+-        "
+-    HAVE_NEW_STYLE_ASSUAN_INQUIRE_EXT )
+-
+-endif( USABLE_ASSUAN_FOUND AND NOT ASSUAN2_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND )
+-
+-  # check if gpg-error already has GPG_ERR_SOURCE_KLEO
+-  check_cxx_source_compiles("
+-        #include <gpg-error.h>
+-        static gpg_err_source_t src = GPG_ERR_SOURCE_KLEO;
+-        int main() { return 0; }
+-        "
+-    HAVE_GPG_ERR_SOURCE_KLEO )
+-
+-endif ( USABLE_ASSUAN_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND AND NOT ASSUAN2_FOUND )
+-
+-  # check if assuan has assuan_sock_get_nonce (via assuan_sock_nonce_t)
+-  # function_exists runs into linking errors - libassuan is static,
+-  # and assuan_sock_get_nonce drags in stuff that needs linking
+-  # against winsock2.
+-  check_cxx_source_compiles("
+-        #include <assuan.h>
+-        static assuan_sock_nonce_t nonce;
+-        int main() { return 0; }
+-        "
+-    HAVE_ASSUAN_SOCK_GET_NONCE )
+-
+-  if ( WIN32 AND NOT HAVE_ASSUAN_SOCK_GET_NONCE )
+-    set( USABLE_ASSUAN_FOUND false )
+-  endif ( WIN32 AND NOT HAVE_ASSUAN_SOCK_GET_NONCE )  
+-
+-endif ( USABLE_ASSUAN_FOUND AND NOT ASSUAN2_FOUND )
+-
+-if ( USABLE_ASSUAN_FOUND )
+-  message( STATUS "Usable assuan found for Kleopatra" )
+-else ( USABLE_ASSUAN_FOUND )
+-  message( STATUS "NO usable assuan found for Kleopatra" )
+-endif ( USABLE_ASSUAN_FOUND )
+-
+-if ( NOT ASSUAN2_FOUND )
+-
+-#
+-# Check that libassuan (which is built statically) can be linked into a DSO
+-# (e.g. on amd64, this requires it to be compiled with -fPIC).
+-#
+-
+-set ( ASSUAN_LINKABLE_TO_DSO false )
+-
+-endif ( NOT ASSUAN2_FOUND )
+-
+-OPTION( BUILD_libkleopatraclient "Build directory kleopatra/libkleopatraclient" ${USABLE_ASSUAN_FOUND} )
+-
+-if ( NOT USABLE_ASSUAN_FOUND )
+-  set( BUILD_libkleopatraclient false )
+-endif ( NOT USABLE_ASSUAN_FOUND )
+-
+-if ( BUILD_libkleopatraclient AND NOT ASSUAN2_FOUND )
+-
+-  message( STATUS "Checking whether libassuan can be linked against from DSO's" )
+-
+-  set ( YUP TRUE )
+-  if ( YUP )
+-    set ( ASSUAN_LINKABLE_TO_DSO true )
+-    message( STATUS "--> Assuming that it can. If compilation of libkleopatraclient fails on AMD64, check that libassuan is compiled with -fPIC and try again. Otherwise, pass -DBUILD_libkleopatraclient=OFF." )
+-  else ( YUP )
+-  # TODO: make this one executed at configure time, so the check below works:
+-  add_library( dso_with_assuan_check SHARED ${CMAKE_SOURCE_DIR}/kleopatra/dso_with_assuan_check.c )
+-
+-  set( CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} dso_with_assuan_check )
+-  check_cxx_source_compiles( "int main() { return 0; }" ASSUAN_LINKABLE_TO_DSO )
+-
+-  if ( ASSUAN_LINKABLE_TO_DSO )
+-    message( STATUS "Usable assuan found for libkleopatraclient" )
+-  else ( ASSUAN_LINKABLE_TO_DSO )
+-    message( STATUS "NO usable assuan found for libkleopatraclient - if this is AMD64, check that libassuan is compiled with -fPIC" )
+-  endif ( ASSUAN_LINKABLE_TO_DSO )
+-  endif ( YUP )
+-
+-endif ( BUILD_libkleopatraclient AND NOT ASSUAN2_FOUND )
+-
+-if (USABLE_ASSUAN_FOUND)
+-  set (HAVE_USABLE_ASSUAN 1)
+-  set (HAVE_KLEOPATRACLIENT_LIBRARY 1)
+-else()
+-  set (HAVE_USABLE_ASSUAN 0)
+-  set (HAVE_KLEOPATRACLIENT_LIBRARY 0)
+-endif()
+-
+-set(CMAKE_REQUIRED_INCLUDES)
+-set(CMAKE_REQUIRED_LIBRARIES)

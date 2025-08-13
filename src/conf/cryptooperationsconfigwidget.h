@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include "labelledwidget.h"
+
 #include <QWidget>
 
 #include <utils/pimpl_ptr.h>
@@ -20,6 +22,10 @@ class QPushButton;
 
 namespace Kleo
 {
+class EMailOperationsPreferences;
+class FileOperationsPreferences;
+class Settings;
+
 namespace Config
 {
 
@@ -28,7 +34,7 @@ class CryptoOperationsConfigWidget : public QWidget
     Q_OBJECT
 public:
     explicit CryptoOperationsConfigWidget(QWidget *parent = nullptr, Qt::WindowFlags f = {});
-    ~CryptoOperationsConfigWidget();
+    ~CryptoOperationsConfigWidget() override;
 
 public Q_SLOTS:
     void load();
@@ -42,15 +48,23 @@ private:
     void setupGui();
     void setupProfileGui(QBoxLayout *layout);
     void applyProfile(const QString &profile);
-    QCheckBox *mQuickEncryptCB,
-              *mQuickSignCB,
-              *mPGPFileExtCB,
-              *mAutoDecryptVerifyCB,
-              *mASCIIArmorCB,
-              *mTmpDirCB;
-    QComboBox *mChecksumDefinitionCB,
-              *mArchiveDefinitionCB;
-    QPushButton *mApplyBtn;
+
+    void load(const Kleo::EMailOperationsPreferences &emailPrefs,
+              const Kleo::FileOperationsPreferences &filePrefs,
+              const Kleo::Settings &settings);
+
+private:
+    QCheckBox *mQuickEncryptCB = nullptr;
+    QCheckBox *mQuickSignCB = nullptr;
+    QCheckBox *mPGPFileExtCB = nullptr;
+    QCheckBox *mAutoDecryptVerifyCB = nullptr;
+    QCheckBox *mAutoExtractArchivesCB = nullptr;
+    QCheckBox *mASCIIArmorCB = nullptr;
+    QCheckBox *mTmpDirCB = nullptr;
+    QCheckBox *mSymmetricOnlyCB = nullptr;
+    Kleo::LabelledWidget<QComboBox> mChecksumDefinitionCB;
+    Kleo::LabelledWidget<QComboBox> mArchiveDefinitionCB;
+    QPushButton *mApplyBtn = nullptr;
 };
 
 }

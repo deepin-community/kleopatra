@@ -2,7 +2,8 @@
     commands/exportsecretkeycommand.cpp
 
     This file is part of Kleopatra, the KDE keymanager
-    SPDX-FileCopyrightText: 2008 Klarälvdalens Datakonsult AB
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -10,168 +11,301 @@
 #include <config-kleopatra.h>
 
 #include "exportsecretkeycommand.h"
-
-#include "fileoperationspreferences.h"
-
 #include "command_p.h"
 
-#include <Libkleo/GnuPG>
-#include <utils/filedialog.h>
+#include "fileoperationspreferences.h"
+#include <utils/applicationstate.h>
+#include "utils/filedialog.h"
 
 #include <Libkleo/Classify>
 #include <Libkleo/Formatting>
 
-#include <gpgme++/key.h>
-
 #include <KLocalizedString>
-#include <QFile>
-#include <QProcess>
+#include <KSharedConfig>
+
+#include <QGpgME/Protocol>
+#include <QGpgME/ExportJob>
+
+#include <QFileInfo>
+#include <QStandardPaths>
+
+#include <gpgme++/context.h>
+
+#include <algorithm>
+#include <memory>
+#include <vector>
+
+#include <kleopatra_debug.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
 using namespace GpgME;
 
-ExportSecretKeyCommand::ExportSecretKeyCommand(KeyListController *c)
-    : GnuPGProcessCommand(c)
+namespace
 {
+
+QString openPGPCertificateFileExtension()
+{
+    return QLatin1String{outputFileExtension(Class::OpenPGP | Class::Ascii | Class::Certificate,
+                                             FileOperationsPreferences().usePGPFileExt())};
 }
 
-ExportSecretKeyCommand::ExportSecretKeyCommand(QAbstractItemView *v, KeyListController *c)
-    : GnuPGProcessCommand(v, c)
+QString cmsCertificateFileExtension()
 {
+    return QLatin1String{outputFileExtension(Class::CMS | Class::Binary | Class::ExportedPSM,
+                                             /*usePGPFileExt=*/false)};
 }
 
-ExportSecretKeyCommand::ExportSecretKeyCommand(const Key &key)
-    : GnuPGProcessCommand(key)
+QString certificateFileExtension(GpgME::Protocol protocol)
 {
-}
-
-ExportSecretKeyCommand::~ExportSecretKeyCommand() {}
-
-void ExportSecretKeyCommand::setFileName(const QString &fileName)
-{
-    m_filename = fileName;
-}
-
-bool ExportSecretKeyCommand::preStartHook(QWidget *parent) const
-{
-    if (!m_filename.isEmpty()) {
-        return true;
+    switch (protocol) {
+    case GpgME::OpenPGP:
+        return openPGPCertificateFileExtension();
+    case GpgME::CMS:
+        return cmsCertificateFileExtension();
+    default:
+        qCWarning(KLEOPATRA_LOG) << __func__ << "Error: Unknown protocol" << protocol;
+        return QStringLiteral("txt");
     }
+}
 
-    const auto key = d->key();
+QString proposeFilename(const Key &key)
+{
+    QString filename;
 
-    const auto protocol = key.protocol();
-
-    QString proposedFileName;
-    const bool usePGPFileExt = FileOperationsPreferences().usePGPFileExt();
     auto name = Formatting::prettyName(key);
     if (name.isEmpty()) {
         name = Formatting::prettyEMail(key);
     }
+    const auto shortKeyID = Formatting::prettyKeyID(key.shortKeyID());
     /* Not translated so it's better to use in tutorials etc. */
-    proposedFileName = QStringLiteral("%1_%2_SECRET.%3").arg(name).arg(
-            Formatting::prettyKeyID(key.shortKeyID())).arg(
-            QString::fromLatin1(outputFileExtension(protocol == OpenPGP
-                    ? Class::OpenPGP | Class::Ascii | Class::Certificate
-                    : Class::CMS | Class::Binary | Class::ExportedPSM, usePGPFileExt)));
+    filename = QStringView{u"%1_%2_SECRET"}.arg(name, shortKeyID);
+    filename.replace(u'/', u'_');
 
-    m_filename = FileDialog::getSaveFileNameEx(parent ? parent : d->parentWidgetOrView(),
-                          i18n("Backup Secret Key"),
-                          QStringLiteral("imp"),
-                          proposedFileName,
-                          protocol == GpgME::OpenPGP
-                          ? i18n("Secret Key Files") + QLatin1String(" (*.asc *.gpg *.pgp)")
-                          : i18n("Secret Key Files")  + QLatin1String(" (*.p12)"));
-
-    m_armor = m_filename.endsWith (QLatin1String (".asc"));
-
-    return !m_filename.isEmpty ();
+    return ApplicationState::lastUsedExportDirectory() + u'/' + filename + u'.' + certificateFileExtension(key.protocol());
 }
 
-QStringList ExportSecretKeyCommand::arguments() const
+QString secretKeyFileFilters(GpgME::Protocol protocol)
 {
-    const Key key = d->key();
-    QStringList result;
+    switch (protocol) {
+    case GpgME::OpenPGP:
+        return i18nc("description of filename filter", "Secret Key Files") + QLatin1String{" (*.asc *.gpg *.pgp)"};
+    case GpgME::CMS:
+        return i18nc("description of filename filter", "Secret Key Files") + QLatin1String{" (*.p12)"};
+    default:
+        qCWarning(KLEOPATRA_LOG) << __func__ << "Error: Unknown protocol" << protocol;
+        return i18nc("description of filename filter", "All Files") + QLatin1String{" (*)"};
+    }
+}
 
-    if (key.protocol() == OpenPGP) {
-        result << gpgPath() << QStringLiteral("--batch");
-    } else {
-        result << gpgSmPath();
+QString requestFilename(const Key &key, const QString &proposedFilename, QWidget *parent)
+{
+    auto filename = FileDialog::getSaveFileNameEx(
+        parent,
+        i18nc("@title:window", "Secret Key Backup"),
+        QStringLiteral("imp"),
+        proposedFilename,
+        secretKeyFileFilters(key.protocol()));
+
+    if (!filename.isEmpty()) {
+        const QFileInfo fi{filename};
+        if (fi.suffix().isEmpty()) {
+            filename += u'.' + certificateFileExtension(key.protocol());
+        }
+        ApplicationState::setLastUsedExportDirectory(filename);
     }
 
-    result << QStringLiteral("--yes") << QStringLiteral("--output") << QStringLiteral("-");
+    return filename;
+}
 
-    if (m_armor) {
-        result << QStringLiteral("--armor");
+QString errorCaption()
+{
+    return i18nc("@title:window", "Secret Key Backup Error");
+}
+
+}
+
+class ExportSecretKeyCommand::Private : public Command::Private
+{
+    friend class ::ExportSecretKeyCommand;
+    ExportSecretKeyCommand *q_func() const
+    {
+        return static_cast<ExportSecretKeyCommand *>(q);
     }
+public:
+    explicit Private(ExportSecretKeyCommand *qq, KeyListController *c = nullptr);
+    ~Private() override;
 
-    if (key.protocol() == CMS) {
-        result << QStringLiteral("--p12-charset") << QStringLiteral("utf-8");
-    }
+    void start();
+    void cancel();
 
-    if (key.protocol() == OpenPGP) {
-        result << QStringLiteral("--export-secret-key");
-    } else {
-        result << QStringLiteral("--export-secret-key-p12");
-    }
+private:
+    std::unique_ptr<QGpgME::ExportJob> startExportJob(const Key &key);
+    void onExportJobResult(const Error &err, const QByteArray &keyData);
+    void showError(const Error &err);
 
-    result << QLatin1String(key.primaryFingerprint());
+private:
+    QString filename;
+    QPointer<QGpgME::ExportJob> job;
+};
 
-    return result;
+ExportSecretKeyCommand::Private *ExportSecretKeyCommand::d_func()
+{
+    return static_cast<Private *>(d.get());
+}
+const ExportSecretKeyCommand::Private *ExportSecretKeyCommand::d_func() const
+{
+    return static_cast<const Private *>(d.get());
 }
 
-QString ExportSecretKeyCommand::errorCaption() const
+#define d d_func()
+#define q q_func()
+
+ExportSecretKeyCommand::Private::Private(ExportSecretKeyCommand *qq, KeyListController *c)
+    : Command::Private{qq, c}
 {
-    return i18nc("@title:window", "Secret Key Export Error");
 }
 
-QString ExportSecretKeyCommand::successCaption() const
-{
-    return i18nc("@title:window", "Secret Key Export Finished");
-}
+ExportSecretKeyCommand::Private::~Private() = default;
 
-QString ExportSecretKeyCommand::crashExitMessage(const QStringList &args) const
+void ExportSecretKeyCommand::Private::start()
 {
-    return xi18nc("@info",
-                  "<para>The GPG or GpgSM process that tried to export the secret key "
-                  "ended prematurely because of an unexpected error.</para>"
-                  "<para>Please check the output of <icode>%1</icode> for details.</para>", args.join(QLatin1Char(' ')));
-}
+    const Key key = this->key();
 
-QString ExportSecretKeyCommand::errorExitMessage(const QStringList &args) const
-{
-    return xi18nc("@info",
-                  "<para>An error occurred while trying to export the secret key.</para> "
-                  "<para>The output from <command>%1</command> was: <message>%2</message></para>",
-                  args[0], errorString());
-}
-
-QString ExportSecretKeyCommand::successMessage(const QStringList &) const
-{
-    if (mHasError) {
-        return QString();
-    }
-    return i18nc("@info", "Secret key successfully exported.");
-}
-
-void ExportSecretKeyCommand::postSuccessHook(QWidget *)
-{
-    Q_ASSERT (process());
-    const auto data = process()->readAllStandardOutput();
-    if (!data.size()) {
-        d->error (i18nc("@info", "Possibly bad passphrase given."),
-                  errorCaption());
-        mHasError = true;
+    if (key.isNull()) {
+        finished();
         return;
     }
-    QFile file(m_filename);
-    /* The filedialog already asked for replace ok. */
-    file.open(QIODevice::ReadWrite | QIODevice::Truncate);
-    if (file.write(data) != data.size()) {
-        d->error(i18nc("@info", "Failed to write data."),
-                 errorCaption());
-        mHasError = true;
+
+    filename = requestFilename(key, proposeFilename(key), parentWidgetOrView());
+    if (filename.isEmpty()) {
+        canceled();
+        return;
     }
-    file.close();
+
+    auto exportJob = startExportJob(key);
+    if (!exportJob) {
+        finished();
+        return;
+    }
+    job = exportJob.release();
 }
+
+void ExportSecretKeyCommand::Private::cancel()
+{
+    if (job) {
+        job->slotCancel();
+    }
+    job.clear();
+}
+
+std::unique_ptr<QGpgME::ExportJob> ExportSecretKeyCommand::Private::startExportJob(const Key &key)
+{
+#ifdef QGPGME_SUPPORTS_SECRET_KEY_EXPORT
+    const bool armor = key.protocol() == GpgME::OpenPGP && filename.endsWith(u".asc", Qt::CaseInsensitive);
+    const QGpgME::Protocol *const backend = (key.protocol() == GpgME::OpenPGP) ? QGpgME::openpgp() : QGpgME::smime();
+    Q_ASSERT(backend);
+    std::unique_ptr<QGpgME::ExportJob> exportJob{backend->secretKeyExportJob(armor)};
+    Q_ASSERT(exportJob);
+
+    if (key.protocol() == GpgME::CMS) {
+        exportJob->setExportFlags(GpgME::Context::ExportPKCS12);
+    }
+
+    connect(exportJob.get(), &QGpgME::ExportJob::result,
+            q, [this](const GpgME::Error &err, const QByteArray &keyData) {
+                onExportJobResult(err, keyData);
+            });
+    connect(exportJob.get(), &QGpgME::Job::progress,
+            q, &Command::progress);
+
+    const GpgME::Error err = exportJob->start({QLatin1String{key.primaryFingerprint()}});
+    if (err) {
+        showError(err);
+        return {};
+    }
+    Q_EMIT q->info(i18nc("@info:status", "Backing up secret key..."));
+
+    return exportJob;
+#else
+    Q_UNUSED(key)
+    return {};
+#endif
+}
+
+void ExportSecretKeyCommand::Private::onExportJobResult(const Error &err, const QByteArray &keyData)
+{
+    if (err.isCanceled()) {
+        finished();
+        return;
+    }
+
+    if (err) {
+        showError(err);
+        finished();
+        return;
+    }
+
+    if (keyData.isEmpty()) {
+        error(i18nc("@info", "The result of the backup is empty. Maybe you entered an empty or a wrong passphrase."),
+              errorCaption());
+        finished();
+        return;
+    }
+
+    QFile f{filename};
+    if (!f.open(QIODevice::WriteOnly)) {
+        error(xi18nc("@info", "Cannot open file <filename>%1</filename> for writing.", filename),
+              errorCaption());
+        finished();
+        return;
+    }
+
+    const auto bytesWritten = f.write(keyData);
+    if (bytesWritten != keyData.size()) {
+        error(xi18nc("@info", "Writing key to file <filename>%1</filename> failed.", filename),
+              errorCaption());
+        finished();
+        return;
+    }
+
+    information(i18nc("@info", "The backup of the secret key was created successfully."),
+                i18nc("@title:window", "Secret Key Backup"));
+    finished();
+}
+
+void ExportSecretKeyCommand::Private::showError(const Error &err)
+{
+    error(xi18nc("@info",
+                 "<para>An error occurred during the backup of the secret key:</para>"
+                 "<para><message>%1</message></para>",
+                 QString::fromLocal8Bit(err.asString())),
+          errorCaption());
+}
+
+ExportSecretKeyCommand::ExportSecretKeyCommand(QAbstractItemView *view, KeyListController *controller)
+    : Command{view, new Private{this, controller}}
+{
+}
+
+ExportSecretKeyCommand::ExportSecretKeyCommand(const GpgME::Key &key)
+    : Command{key, new Private{this}}
+{
+}
+
+ExportSecretKeyCommand::~ExportSecretKeyCommand() = default;
+
+void ExportSecretKeyCommand::doStart()
+{
+    d->start();
+}
+
+void ExportSecretKeyCommand::doCancel()
+{
+    d->cancel();
+}
+
+#undef d
+#undef q
+
+#include "moc_exportsecretkeycommand.cpp"

@@ -29,11 +29,6 @@
 
 #include "kleopatra_debug.h"
 
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E01 // 1.14.1
-# define CHANGEEXPIRYJOB_SUPPORTS_SUBKEYS
-#endif
-
 using namespace Kleo;
 using namespace Kleo::Commands;
 using namespace Kleo::Dialogs;
@@ -55,12 +50,14 @@ bool allNotRevokedSubkeysHaveSameExpirationAsPrimaryKey(const Key &key)
         });
     }
 
-    const auto primaryExpiration = primaryKey.expirationTime();
-    return std::all_of(std::begin(subkeys), std::end(subkeys), [primaryExpiration] (const auto &subkey) {
+    const auto primaryExpiration = quint32(primaryKey.expirationTime());
+    const auto range = std::make_pair(primaryExpiration > 10 ? primaryExpiration - 10 : 0,
+                                      primaryExpiration < std::numeric_limits<quint32>::max() - 10 ? primaryExpiration + 10 : std::numeric_limits<quint32>::max());
+    return std::all_of(std::begin(subkeys), std::end(subkeys), [range](const auto &subkey) {
         // revoked subkeys are ignored by gpg --quick-set-expire when updating the expiration of all subkeys;
         // check if expiration of subkey is (more or less) the same as the expiration of the primary key
         return subkey.isRevoked() ||
-            (primaryExpiration - 10 <= subkey.expirationTime() && subkey.expirationTime() <= primaryExpiration + 10);
+            (range.first <= quint32(subkey.expirationTime()) && quint32(subkey.expirationTime()) <= range.second);
     });
 }
 #endif
@@ -133,16 +130,12 @@ void ChangeExpiryCommand::Private::slotDialogAccepted()
     }
 #endif
 
-#ifdef CHANGEEXPIRYJOB_SUPPORTS_SUBKEYS
     std::vector<Subkey> subkeys;
     if (!subkey.isNull() && subkey.keyID() != key.keyID()) { // ignore the primary subkey
         subkeys.push_back(subkey);
     }
 
     if (const Error err = job->start(key, expiry, subkeys)) {
-#else
-    if (const Error err = job->start(key, expiry)) {
-#endif
         showErrorDialog(err);
         finished();
     }
@@ -176,8 +169,8 @@ void ChangeExpiryCommand::Private::ensureDialogCreated(ExpiryDialog::Mode mode)
     applyWindowID(dialog);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 void ChangeExpiryCommand::Private::createJob()
@@ -205,16 +198,14 @@ void ChangeExpiryCommand::Private::createJob()
 void ChangeExpiryCommand::Private::showErrorDialog(const Error &err)
 {
     error(i18n("<p>An error occurred while trying to change "
-               "the expiry date for <b>%1</b>:</p><p>%2</p>",
+               "the end of the validity period for <b>%1</b>:</p><p>%2</p>",
                Formatting::formatForComboBox(key),
-               QString::fromLocal8Bit(err.asString())),
-          i18n("Expiry Date Change Error"));
+               QString::fromLocal8Bit(err.asString())));
 }
 
 void ChangeExpiryCommand::Private::showSuccessDialog()
 {
-    information(i18n("Expiry date changed successfully."),
-                i18n("Expiry Date Change Succeeded"));
+    success(i18n("End of validity period changed successfully."));
 }
 
 ChangeExpiryCommand::ChangeExpiryCommand(KeyListController *c)
@@ -272,7 +263,7 @@ void ChangeExpiryCommand::doStart()
     Q_ASSERT(d->dialog);
     const Subkey subkey = !d->subkey.isNull() ? d->subkey : d->key.subkey(0);
     d->dialog->setDateOfExpiry(subkey.neverExpires() ? QDate() :
-                               QDateTime::fromSecsSinceEpoch(subkey.expirationTime()).date());
+                               QDateTime::fromSecsSinceEpoch(quint32(subkey.expirationTime())).date());
 #ifdef QGPGME_SUPPORTS_CHANGING_EXPIRATION_OF_COMPLETE_KEY
     if (mode == ExpiryDialog::Mode::UpdateCertificateWithSubkeys) {
         d->dialog->setUpdateExpirationOfAllSubkeys(allNotRevokedSubkeysHaveSameExpirationAsPrimaryKey(d->key));

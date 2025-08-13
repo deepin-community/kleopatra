@@ -34,7 +34,7 @@ class KeyListController : public QObject
     Q_OBJECT
 public:
     explicit KeyListController(QObject *parent = nullptr);
-    ~KeyListController();
+    ~KeyListController() override;
 
     std::vector<QAbstractItemView *> views() const;
 
@@ -95,18 +95,6 @@ Q_SIGNALS:
 private:
     class Private;
     kdtools::pimpl_ptr<Private> d;
-
-    Q_PRIVATE_SLOT(d, void slotDestroyed(QObject *))
-    Q_PRIVATE_SLOT(d, void slotDoubleClicked(QModelIndex))
-    Q_PRIVATE_SLOT(d, void slotActivated(QModelIndex))
-    Q_PRIVATE_SLOT(d, void slotSelectionChanged(QItemSelection, QItemSelection))
-    Q_PRIVATE_SLOT(d, void slotContextMenu(QPoint))
-    Q_PRIVATE_SLOT(d, void slotCommandFinished())
-    Q_PRIVATE_SLOT(d, void slotAddKey(GpgME::Key))
-    Q_PRIVATE_SLOT(d, void slotAboutToRemoveKey(GpgME::Key))
-    Q_PRIVATE_SLOT(d, void slotProgress(QString, int, int))
-    Q_PRIVATE_SLOT(d, void slotActionTriggered())
-    Q_PRIVATE_SLOT(d, void slotCurrentViewChanged(QAbstractItemView *))
 };
 
 }

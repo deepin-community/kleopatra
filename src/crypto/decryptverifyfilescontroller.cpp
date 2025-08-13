@@ -169,7 +169,7 @@ void DecryptVerifyFilesController::Private::slotWizardOperationPrepared()
 
 void DecryptVerifyFilesController::Private::slotWizardCanceled()
 {
-    qCDebug(KLEOPATRA_LOG);
+    q->emitDoneOrError();
 }
 
 void DecryptVerifyFilesController::doTaskDone(const Task *task, const std::shared_ptr<const Task::Result> &result)
@@ -227,7 +227,7 @@ void DecryptVerifyFilesController::Private::ensureWizardCreated()
 
 namespace
 {
-struct FindExtension : std::unary_function<std::shared_ptr<ArchiveDefinition>, bool> {
+struct FindExtension {
     const QString ext;
     const Protocol proto;
     FindExtension(const QString &ext, Protocol proto) : ext(ext), proto(proto) {}
@@ -367,7 +367,7 @@ std::vector< std::shared_ptr<Task> > DecryptVerifyFilesController::Private::buil
             kleo_assert(fileDir.exists());
             tasks.push_back(taskFromOperationWidget(m_wizard->operationWidget(static_cast<unsigned int>(i)), fileNames[i], useOutDir ? outDir : fileDir, overwritePolicy));
         } catch (const GpgME::Exception &e) {
-            tasks.push_back(Task::makeErrorTask(e.error().code(), QString::fromLocal8Bit(e.what()), fileNames[i]));
+            tasks.push_back(Task::makeErrorTask(e.error(), QString::fromLocal8Bit(e.what()), fileNames[i]));
         }
 
     return tasks;

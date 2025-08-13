@@ -1,4 +1,7 @@
+# SPDX-FileCopyrightText: none
+# SPDX-License-Identifier: BSD-3-Clause
 add_subdirectory(icons)
+add_subdirectory(mimetypes)
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -13,10 +16,10 @@ add_subdirectory(kconf_update)
 if(WIN32)
   set(_kleopatra_extra_uiserver_SRCS uiserver/uiserver_win.cpp)
   set(_kleopatra_extra_SRCS
-      utils/gnupg-registry.c
       selftest/registrycheck.cpp
-      utils/windowsprocessdevice.cpp
+      utils/gnupg-registry.c
       utils/userinfo_win.cpp
+      utils/windowsprocessdevice.cpp
   )
 else()
   set(_kleopatra_extra_uiserver_SRCS uiserver/uiserver_unix.cpp)
@@ -24,24 +27,24 @@ else()
 endif()
 
 set(_kleopatra_uiserver_SRCS
-    uiserver/sessiondata.cpp
-    uiserver/uiserver.cpp
     ${_kleopatra_extra_uiserver_SRCS}
-    uiserver/assuanserverconnection.cpp
-    uiserver/echocommand.cpp
-    uiserver/decryptverifycommandemailbase.cpp
-    uiserver/decryptverifycommandfilesbase.cpp
-    uiserver/signcommand.cpp
-    uiserver/signencryptfilescommand.cpp
-    uiserver/prepencryptcommand.cpp
-    uiserver/prepsigncommand.cpp
-    uiserver/encryptcommand.cpp
-    uiserver/selectcertificatecommand.cpp
-    uiserver/importfilescommand.cpp
-    uiserver/createchecksumscommand.cpp
-    uiserver/verifychecksumscommand.cpp
 
     selftest/uiservercheck.cpp
+    uiserver/assuanserverconnection.cpp
+    uiserver/createchecksumscommand.cpp
+    uiserver/decryptverifycommandemailbase.cpp
+    uiserver/decryptverifycommandfilesbase.cpp
+    uiserver/echocommand.cpp
+    uiserver/encryptcommand.cpp
+    uiserver/importfilescommand.cpp
+    uiserver/prepencryptcommand.cpp
+    uiserver/prepsigncommand.cpp
+    uiserver/selectcertificatecommand.cpp
+    uiserver/sessiondata.cpp
+    uiserver/signcommand.cpp
+    uiserver/signencryptfilescommand.cpp
+    uiserver/uiserver.cpp
+    uiserver/verifychecksumscommand.cpp
   )
 
 if(ASSUAN2_FOUND)
@@ -64,228 +67,466 @@ else()
   add_definitions(-DGPGMEPP_ERR_SOURCE_DEFAULT=GPG_ERR_SOURCE_USER_1)
 endif()
 
-ki18n_wrap_ui(_kleopatra_uiserver_SRCS crypto/gui/signingcertificateselectionwidget.ui)
-
-if("${Gpgmepp_VERSION}" VERSION_GREATER_EQUAL "1.14.1")
-    set(_kleopatra_deviceinfowatcher_files
-        smartcard/deviceinfowatcher.cpp
-    )
-else()
-    set(_kleopatra_deviceinfowatcher_files)
+if(KF5IdentityManagement_FOUND AND KF5MailTransport_FOUND AND KF5MailTransportAkonadi_FOUND)
+  set(_kleopatra_mail_libs
+      KF5::IdentityManagement # Export OpenPGP keys using WKS
+      KF5::MailTransport
+      KF5::MailTransportAkonadi
+  )
+  add_definitions(-DMAILAKONADI_ENABLED)
 endif()
 
+ki18n_wrap_ui(_kleopatra_uiserver_SRCS crypto/gui/signingcertificateselectionwidget.ui)
+
 set(_kleopatra_SRCS
-  utils/gui-helper.cpp
-  utils/filedialog.cpp
-  utils/kdpipeiodevice.cpp
-  utils/headerview.cpp
-  utils/scrollarea.cpp
-  utils/dragqueen.cpp
-  utils/multivalidator.cpp
-  utils/systemtrayicon.cpp
-
-  utils/hex.cpp
-  utils/path-helper.cpp
-  utils/input.cpp
-  utils/output.cpp
-  utils/validation.cpp
-  utils/wsastarter.cpp
-  utils/iodevicelogger.cpp
-  utils/log.cpp
-  utils/action_data.cpp
-  utils/types.cpp
-  utils/archivedefinition.cpp
-  utils/auditlog.cpp
-  utils/clipboardmenu.cpp
-  utils/kuniqueservice.cpp
-  utils/tags.cpp
-  utils/writecertassuantransaction.cpp
-  utils/keyparameters.cpp
-  utils/userinfo.cpp
-
-  selftest/selftest.cpp
-  selftest/enginecheck.cpp
-  selftest/gpgconfcheck.cpp
-  selftest/gpgagentcheck.cpp
-  selftest/libkleopatrarccheck.cpp
-
   ${_kleopatra_extra_SRCS}
 
-  view/keylistcontroller.cpp
-  view/keytreeview.cpp
-  view/searchbar.cpp
-  view/smartcardwidget.cpp
-  view/openpgpkeycardwidget.cpp
-  view/padwidget.cpp
-  view/pgpcardwidget.cpp
-  view/pivcardwidget.cpp
-  view/p15cardwidget.cpp
-  view/netkeywidget.cpp
-  view/nullpinwidget.cpp
-  view/tabwidget.cpp
-  view/keycacheoverlay.cpp
-  view/waitwidget.cpp
-  view/welcomewidget.cpp
-
-  dialogs/certificateselectiondialog.cpp
-  dialogs/certifywidget.cpp
-  dialogs/expirydialog.cpp
-  dialogs/lookupcertificatesdialog.cpp
-  dialogs/ownertrustdialog.cpp
-  dialogs/selftestdialog.cpp
-  dialogs/certifycertificatedialog.cpp
-  dialogs/revokecertificationwidget.cpp
-  dialogs/revokecertificationdialog.cpp
-  dialogs/adduseriddialog.cpp
-  dialogs/addemaildialog.cpp
-  dialogs/deletecertificatesdialog.cpp
-  dialogs/setinitialpindialog.cpp
-  dialogs/certificatedetailsdialog.cpp
-  dialogs/certificatedetailswidget.cpp
-  dialogs/trustchainwidget.cpp
-  dialogs/weboftrustwidget.cpp
-  dialogs/weboftrustdialog.cpp
-  dialogs/exportdialog.cpp
-  dialogs/subkeyswidget.cpp
-  dialogs/gencardkeydialog.cpp
-  dialogs/updatenotification.cpp
-  dialogs/pivcardapplicationadministrationkeyinputdialog.cpp
-  dialogs/certificatedetailsinputwidget.cpp
-  dialogs/createcsrforcardkeydialog.cpp
-  dialogs/groupdetailsdialog.cpp
-  dialogs/editgroupdialog.cpp
-
-  crypto/controller.cpp
-  crypto/certificateresolver.cpp
-  crypto/sender.cpp
-  crypto/recipient.cpp
-  crypto/task.cpp
-  crypto/taskcollection.cpp
-  crypto/decryptverifytask.cpp
-  crypto/decryptverifyemailcontroller.cpp
-  crypto/decryptverifyfilescontroller.cpp
-  crypto/autodecryptverifyfilescontroller.cpp
-  crypto/encryptemailtask.cpp
-  crypto/encryptemailcontroller.cpp
-  crypto/newsignencryptemailcontroller.cpp
-  crypto/signencrypttask.cpp
-  crypto/signencryptfilescontroller.cpp
-  crypto/signemailtask.cpp
-  crypto/signemailcontroller.cpp
-  crypto/createchecksumscontroller.cpp
-  crypto/verifychecksumscontroller.cpp
-
-  crypto/gui/wizard.cpp
-  crypto/gui/wizardpage.cpp
-
-  crypto/gui/certificateselectionline.cpp
-  crypto/gui/certificatelineedit.cpp
-  crypto/gui/signingcertificateselectionwidget.cpp
-  crypto/gui/signingcertificateselectiondialog.cpp
-
-  crypto/gui/resultitemwidget.cpp
-  crypto/gui/resultlistwidget.cpp
-  crypto/gui/resultpage.cpp
-
-  crypto/gui/newresultpage.cpp
-  crypto/gui/signencryptfileswizard.cpp
-
-  crypto/gui/signencryptemailconflictdialog.cpp
-
-  crypto/gui/decryptverifyoperationwidget.cpp
-  crypto/gui/decryptverifyfileswizard.cpp
-  crypto/gui/decryptverifyfilesdialog.cpp
-
-  crypto/gui/objectspage.cpp
-  crypto/gui/resolverecipientspage.cpp
-  crypto/gui/signerresolvepage.cpp
-  crypto/gui/encryptemailwizard.cpp
-  crypto/gui/signemailwizard.cpp
-  crypto/gui/signencryptwidget.cpp
-  crypto/gui/signencryptwizard.cpp
-  crypto/gui/unknownrecipientwidget.cpp
-
-  crypto/gui/verifychecksumsdialog.cpp
-
-  commands/command.cpp
-  commands/gnupgprocesscommand.cpp
-  commands/detailscommand.cpp
-  commands/exportcertificatecommand.cpp
-  commands/importcertificatescommand.cpp
-  commands/importcertificatefromfilecommand.cpp
-  commands/importcertificatefromclipboardcommand.cpp
-  commands/importcertificatefromdatacommand.cpp
-  commands/lookupcertificatescommand.cpp
-  commands/reloadkeyscommand.cpp
-  commands/refreshx509certscommand.cpp
-  commands/refreshopenpgpcertscommand.cpp
-  commands/deletecertificatescommand.cpp
-  commands/decryptverifyfilescommand.cpp
-  commands/signencryptfilescommand.cpp
-  commands/signencryptfoldercommand.cpp
-  commands/encryptclipboardcommand.cpp
-  commands/signclipboardcommand.cpp
-  commands/decryptverifyclipboardcommand.cpp
-  commands/clearcrlcachecommand.cpp
-  commands/dumpcrlcachecommand.cpp
-  commands/dumpcertificatecommand.cpp
-  commands/importcrlcommand.cpp
-  commands/changeexpirycommand.cpp
-  commands/changeownertrustcommand.cpp
-  commands/changeroottrustcommand.cpp
-  commands/changepassphrasecommand.cpp
-  commands/certifycertificatecommand.cpp
-  commands/revokecertificationcommand.cpp
-  commands/selftestcommand.cpp
-  commands/exportsecretkeycommand.cpp
-  commands/exportopenpgpcertstoservercommand.cpp
+  accessibility/accessiblelink.cpp
+  accessibility/accessiblelink_p.h
+  accessibility/accessiblerichtextlabel.cpp
+  accessibility/accessiblerichtextlabel_p.h
+  accessibility/accessiblevaluelabel.cpp
+  accessibility/accessiblevaluelabel_p.h
+  accessibility/accessiblewidgetfactory.cpp
+  accessibility/accessiblewidgetfactory.h
   commands/adduseridcommand.cpp
-  commands/newcertificatecommand.cpp
-  commands/setinitialpincommand.cpp
-  commands/learncardkeyscommand.cpp
-  commands/checksumcreatefilescommand.cpp
-  commands/checksumverifyfilescommand.cpp
-  commands/exportpaperkeycommand.cpp
-  commands/importpaperkeycommand.cpp
-  commands/genrevokecommand.cpp
-  commands/keytocardcommand.cpp
-  commands/cardcommand.cpp
-  commands/pivgeneratecardkeycommand.cpp
-  commands/changepincommand.cpp
+  commands/adduseridcommand.h
   commands/authenticatepivcardapplicationcommand.cpp
-  commands/setpivcardapplicationadministrationkeycommand.cpp
+  commands/authenticatepivcardapplicationcommand.h
+  commands/cardcommand.cpp
+  commands/cardcommand.h
   commands/certificatetopivcardcommand.cpp
-  commands/importcertificatefrompivcardcommand.cpp
-  commands/createopenpgpkeyfromcardkeyscommand.cpp
+  commands/certificatetopivcardcommand.h
+  commands/certifycertificatecommand.cpp
+  commands/certifycertificatecommand.h
+  commands/changeexpirycommand.cpp
+  commands/changeexpirycommand.h
+  commands/changeownertrustcommand.cpp
+  commands/changeownertrustcommand.h
+  commands/changepassphrasecommand.cpp
+  commands/changepassphrasecommand.h
+  commands/changepincommand.cpp
+  commands/changepincommand.h
+  commands/changeroottrustcommand.cpp
+  commands/changeroottrustcommand.h
+  commands/checksumcreatefilescommand.cpp
+  commands/checksumcreatefilescommand.h
+  commands/checksumverifyfilescommand.cpp
+  commands/checksumverifyfilescommand.h
+  commands/clearcrlcachecommand.cpp
+  commands/clearcrlcachecommand.h
+  commands/command.cpp
+  commands/command.h
   commands/createcsrforcardkeycommand.cpp
-
-  ${_kleopatra_uiserver_files}
-
+  commands/createcsrforcardkeycommand.h
+  commands/createopenpgpkeyfromcardkeyscommand.cpp
+  commands/createopenpgpkeyfromcardkeyscommand.h
+  commands/decryptverifyclipboardcommand.cpp
+  commands/decryptverifyclipboardcommand.h
+  commands/decryptverifyfilescommand.cpp
+  commands/decryptverifyfilescommand.h
+  commands/deletecertificatescommand.cpp
+  commands/deletecertificatescommand.h
+  commands/detailscommand.cpp
+  commands/detailscommand.h
+  commands/dumpcertificatecommand.cpp
+  commands/dumpcertificatecommand.h
+  commands/dumpcrlcachecommand.cpp
+  commands/dumpcrlcachecommand.h
+  commands/encryptclipboardcommand.cpp
+  commands/encryptclipboardcommand.h
+  commands/exportcertificatecommand.cpp
+  commands/exportcertificatecommand.h
+  commands/exportgroupscommand.cpp
+  commands/exportgroupscommand.h
+  commands/exportopenpgpcertstoservercommand.cpp
+  commands/exportopenpgpcertstoservercommand.h
+  commands/exportopenpgpcerttoprovidercommand.cpp
+  commands/exportopenpgpcerttoprovidercommand.h
+  commands/exportpaperkeycommand.cpp
+  commands/exportpaperkeycommand.h
+  commands/exportsecretkeycommand.cpp
+  commands/exportsecretkeycommand.h
+  commands/exportsecretkeycommand_old.cpp
+  commands/exportsecretkeycommand_old.h
+  commands/exportsecretsubkeycommand.cpp
+  commands/exportsecretsubkeycommand.h
+  commands/genrevokecommand.cpp
+  commands/genrevokecommand.h
+  commands/gnupgprocesscommand.cpp
+  commands/gnupgprocesscommand.h
+  commands/importcertificatefromclipboardcommand.cpp
+  commands/importcertificatefromclipboardcommand.h
+  commands/importcertificatefromdatacommand.cpp
+  commands/importcertificatefromdatacommand.h
+  commands/importcertificatefromfilecommand.cpp
+  commands/importcertificatefromfilecommand.h
+  commands/importcertificatefromkeyservercommand.cpp
+  commands/importcertificatefromkeyservercommand.h
+  commands/importcertificatefrompivcardcommand.cpp
+  commands/importcertificatefrompivcardcommand.h
+  commands/importcertificatescommand.cpp
+  commands/importcertificatescommand.h
+  commands/importcrlcommand.cpp
+  commands/importcrlcommand.h
+  commands/importpaperkeycommand.cpp
+  commands/importpaperkeycommand.h
+  commands/keytocardcommand.cpp
+  commands/keytocardcommand.h
+  commands/learncardkeyscommand.cpp
+  commands/learncardkeyscommand.h
+  commands/lookupcertificatescommand.cpp
+  commands/lookupcertificatescommand.h
+  commands/newcertificatesigningrequestcommand.cpp
+  commands/newcertificatesigningrequestcommand.h
+  commands/newopenpgpcertificatecommand.cpp
+  commands/newopenpgpcertificatecommand.h
+  commands/openpgpgeneratecardkeycommand.cpp
+  commands/openpgpgeneratecardkeycommand.h
+  commands/pivgeneratecardkeycommand.cpp
+  commands/pivgeneratecardkeycommand.h
+  commands/refreshcertificatecommand.cpp
+  commands/refreshcertificatecommand.h
+  commands/refreshopenpgpcertscommand.cpp
+  commands/refreshopenpgpcertscommand.h
+  commands/refreshx509certscommand.cpp
+  commands/refreshx509certscommand.h
+  commands/reloadkeyscommand.cpp
+  commands/reloadkeyscommand.h
+  commands/revokecertificationcommand.cpp
+  commands/revokecertificationcommand.h
+  commands/revokekeycommand.cpp
+  commands/revokekeycommand.h
+  commands/revokeuseridcommand.cpp
+  commands/revokeuseridcommand.h
+  commands/selftestcommand.cpp
+  commands/selftestcommand.h
+  commands/setinitialpincommand.cpp
+  commands/setinitialpincommand.h
+  commands/setpivcardapplicationadministrationkeycommand.cpp
+  commands/setpivcardapplicationadministrationkeycommand.h
+  commands/setprimaryuseridcommand.cpp
+  commands/setprimaryuseridcommand.h
+  commands/signclipboardcommand.cpp
+  commands/signclipboardcommand.h
+  commands/signencryptfilescommand.cpp
+  commands/signencryptfilescommand.h
+  commands/signencryptfoldercommand.cpp
+  commands/signencryptfoldercommand.h
   conf/configuredialog.cpp
+  conf/configuredialog.h
   conf/groupsconfigdialog.cpp
+  conf/groupsconfigdialog.h
   conf/groupsconfigpage.cpp
+  conf/groupsconfigpage.h
   conf/groupsconfigwidget.cpp
-
+  conf/groupsconfigwidget.h
+  crypto/autodecryptverifyfilescontroller.cpp
+  crypto/autodecryptverifyfilescontroller.h
+  crypto/certificateresolver.cpp
+  crypto/certificateresolver.h
+  crypto/checksumsutils_p.cpp
+  crypto/checksumsutils_p.h
+  crypto/controller.cpp
+  crypto/controller.h
+  crypto/createchecksumscontroller.cpp
+  crypto/createchecksumscontroller.h
+  crypto/decryptverifyemailcontroller.cpp
+  crypto/decryptverifyemailcontroller.h
+  crypto/decryptverifyfilescontroller.cpp
+  crypto/decryptverifyfilescontroller.h
+  crypto/decryptverifytask.cpp
+  crypto/decryptverifytask.h
+  crypto/encryptemailcontroller.cpp
+  crypto/encryptemailcontroller.h
+  crypto/encryptemailtask.cpp
+  crypto/encryptemailtask.h
+  crypto/gui/certificatelineedit.cpp
+  crypto/gui/certificatelineedit.h
+  crypto/gui/certificateselectionline.cpp
+  crypto/gui/certificateselectionline.h
+  crypto/gui/decryptverifyfilesdialog.cpp
+  crypto/gui/decryptverifyfilesdialog.h
+  crypto/gui/decryptverifyfileswizard.cpp
+  crypto/gui/decryptverifyfileswizard.h
+  crypto/gui/decryptverifyoperationwidget.cpp
+  crypto/gui/decryptverifyoperationwidget.h
+  crypto/gui/encryptemailwizard.cpp
+  crypto/gui/encryptemailwizard.h
+  crypto/gui/newresultpage.cpp
+  crypto/gui/newresultpage.h
+  crypto/gui/objectspage.cpp
+  crypto/gui/objectspage.h
+  crypto/gui/resolverecipientspage.cpp
+  crypto/gui/resolverecipientspage.h
+  crypto/gui/resultitemwidget.cpp
+  crypto/gui/resultitemwidget.h
+  crypto/gui/resultlistwidget.cpp
+  crypto/gui/resultlistwidget.h
+  crypto/gui/resultpage.cpp
+  crypto/gui/resultpage.h
+  crypto/gui/signemailwizard.cpp
+  crypto/gui/signemailwizard.h
+  crypto/gui/signencryptemailconflictdialog.cpp
+  crypto/gui/signencryptemailconflictdialog.h
+  crypto/gui/signencryptfileswizard.cpp
+  crypto/gui/signencryptfileswizard.h
+  crypto/gui/signencryptwidget.cpp
+  crypto/gui/signencryptwidget.h
+  crypto/gui/signencryptwizard.cpp
+  crypto/gui/signencryptwizard.h
+  crypto/gui/signerresolvepage.cpp
+  crypto/gui/signerresolvepage.h
+  crypto/gui/signingcertificateselectiondialog.cpp
+  crypto/gui/signingcertificateselectiondialog.h
+  crypto/gui/signingcertificateselectionwidget.cpp
+  crypto/gui/signingcertificateselectionwidget.h
+  crypto/gui/unknownrecipientwidget.cpp
+  crypto/gui/unknownrecipientwidget.h
+  crypto/gui/verifychecksumsdialog.cpp
+  crypto/gui/verifychecksumsdialog.h
+  crypto/gui/wizard.cpp
+  crypto/gui/wizard.h
+  crypto/gui/wizardpage.cpp
+  crypto/gui/wizardpage.h
+  crypto/newsignencryptemailcontroller.cpp
+  crypto/newsignencryptemailcontroller.h
+  crypto/recipient.cpp
+  crypto/recipient.h
+  crypto/sender.cpp
+  crypto/sender.h
+  crypto/signemailcontroller.cpp
+  crypto/signemailcontroller.h
+  crypto/signemailtask.cpp
+  crypto/signemailtask.h
+  crypto/signencryptfilescontroller.cpp
+  crypto/signencryptfilescontroller.h
+  crypto/signencrypttask.cpp
+  crypto/signencrypttask.h
+  crypto/task.cpp
+  crypto/task.h
+  crypto/taskcollection.cpp
+  crypto/taskcollection.h
+  crypto/verifychecksumscontroller.cpp
+  crypto/verifychecksumscontroller.h
+  dialogs/adduseriddialog.cpp
+  dialogs/adduseriddialog.h
+  dialogs/certificatedetailsdialog.cpp
+  dialogs/certificatedetailsdialog.h
+  dialogs/certificatedetailsinputwidget.cpp
+  dialogs/certificatedetailsinputwidget.h
+  dialogs/certificatedetailswidget.cpp
+  dialogs/certificatedetailswidget.h
+  dialogs/certificateselectiondialog.cpp
+  dialogs/certificateselectiondialog.h
+  dialogs/certifycertificatedialog.cpp
+  dialogs/certifycertificatedialog.h
+  dialogs/certifywidget.cpp
+  dialogs/certifywidget.h
+  dialogs/createcsrforcardkeydialog.cpp
+  dialogs/createcsrforcardkeydialog.h
+  dialogs/deletecertificatesdialog.cpp
+  dialogs/deletecertificatesdialog.h
+  dialogs/editgroupdialog.cpp
+  dialogs/editgroupdialog.h
+  dialogs/expirydialog.cpp
+  dialogs/expirydialog.h
+  dialogs/exportdialog.cpp
+  dialogs/exportdialog.h
+  dialogs/gencardkeydialog.cpp
+  dialogs/gencardkeydialog.h
+  dialogs/groupdetailsdialog.cpp
+  dialogs/groupdetailsdialog.h
+  dialogs/lookupcertificatesdialog.cpp
+  dialogs/lookupcertificatesdialog.h
+  dialogs/nameandemailwidget.cpp
+  dialogs/nameandemailwidget.h
+  dialogs/newopenpgpcertificatedetailsdialog.cpp
+  dialogs/newopenpgpcertificatedetailsdialog.h
+  dialogs/ownertrustdialog.cpp
+  dialogs/ownertrustdialog.h
+  dialogs/pivcardapplicationadministrationkeyinputdialog.cpp
+  dialogs/pivcardapplicationadministrationkeyinputdialog.h
+  dialogs/revokekeydialog.cpp
+  dialogs/revokekeydialog.h
+  dialogs/selftestdialog.cpp
+  dialogs/selftestdialog.h
+  dialogs/setinitialpindialog.cpp
+  dialogs/setinitialpindialog.h
+  dialogs/subkeyswidget.cpp
+  dialogs/subkeyswidget.h
+  dialogs/trustchainwidget.cpp
+  dialogs/trustchainwidget.h
+  dialogs/updatenotification.cpp
+  dialogs/updatenotification.h
+  dialogs/weboftrustdialog.cpp
+  dialogs/weboftrustdialog.h
+  dialogs/weboftrustwidget.cpp
+  dialogs/weboftrustwidget.h
+  interfaces/anchorprovider.h
+  interfaces/focusfirstchild.h
+  newcertificatewizard/advancedsettingsdialog.cpp
+  newcertificatewizard/advancedsettingsdialog_p.h
+  newcertificatewizard/enterdetailspage.cpp
+  newcertificatewizard/enterdetailspage_p.h
+  newcertificatewizard/keyalgo.cpp
+  newcertificatewizard/keyalgo_p.h
+  newcertificatewizard/keycreationpage.cpp
+  newcertificatewizard/keycreationpage_p.h
   newcertificatewizard/listwidget.cpp
+  newcertificatewizard/listwidget.h
   newcertificatewizard/newcertificatewizard.cpp
-
-  smartcard/readerstatus.cpp
+  newcertificatewizard/newcertificatewizard.h
+  newcertificatewizard/resultpage.cpp
+  newcertificatewizard/resultpage_p.h
+  newcertificatewizard/wizardpage.cpp
+  newcertificatewizard/wizardpage_p.h
+  selftest/compliancecheck.cpp
+  selftest/compliancecheck.h
+  selftest/enginecheck.cpp
+  selftest/enginecheck.h
+  selftest/gpgagentcheck.cpp
+  selftest/gpgagentcheck.h
+  selftest/gpgconfcheck.cpp
+  selftest/gpgconfcheck.h
+  selftest/libkleopatrarccheck.cpp
+  selftest/libkleopatrarccheck.h
+  selftest/selftest.cpp
+  selftest/selftest.h
+  smartcard/algorithminfo.h
   smartcard/card.cpp
-  smartcard/openpgpcard.cpp
-  smartcard/netkeycard.cpp
-  smartcard/pivcard.cpp
-  smartcard/p15card.cpp
+  smartcard/card.h
+  smartcard/deviceinfowatcher.cpp
+  smartcard/deviceinfowatcher.h
   smartcard/keypairinfo.cpp
+  smartcard/keypairinfo.h
+  smartcard/netkeycard.cpp
+  smartcard/netkeycard.h
+  smartcard/openpgpcard.cpp
+  smartcard/openpgpcard.h
+  smartcard/p15card.cpp
+  smartcard/p15card.h
+  smartcard/pivcard.cpp
+  smartcard/pivcard.h
+  smartcard/readerstatus.cpp
+  smartcard/readerstatus.h
   smartcard/utils.cpp
-
-  ${_kleopatra_deviceinfowatcher_files}
+  smartcard/utils.h
+  utils/accessibility.cpp
+  utils/accessibility.h
+  utils/action_data.cpp
+  utils/action_data.h
+  utils/applicationstate.cpp
+  utils/applicationstate.h
+  utils/archivedefinition.cpp
+  utils/archivedefinition.h
+  utils/auditlog.cpp
+  utils/auditlog.h
+  utils/clipboardmenu.cpp
+  utils/clipboardmenu.h
+  utils/debug-helpers.cpp
+  utils/debug-helpers.h
+  utils/dragqueen.cpp
+  utils/dragqueen.h
+  utils/email.cpp
+  utils/email.h
+  utils/emptypassphraseprovider.cpp
+  utils/emptypassphraseprovider.h
+  utils/filedialog.cpp
+  utils/filedialog.h
+  utils/gui-helper.cpp
+  utils/gui-helper.h
+  utils/headerview.cpp
+  utils/headerview.h
+  utils/input.cpp
+  utils/input.h
+  utils/iodevicelogger.cpp
+  utils/iodevicelogger.h
+  utils/kdpipeiodevice.cpp
+  utils/kdpipeiodevice.h
+  utils/keyparameters.cpp
+  utils/keyparameters.h
+  utils/keys.cpp
+  utils/keys.h
+  utils/kuniqueservice.cpp
+  utils/kuniqueservice.h
+  utils/log.cpp
+  utils/log.h
+  utils/multivalidator.cpp
+  utils/multivalidator.h
+  utils/output.cpp
+  utils/output.h
+  utils/path-helper.cpp
+  utils/path-helper.h
+  utils/scrollarea.cpp
+  utils/scrollarea.h
+  utils/systemtrayicon.cpp
+  utils/systemtrayicon.h
+  utils/tags.cpp
+  utils/tags.h
+  utils/types.cpp
+  utils/types.h
+  utils/userinfo.cpp
+  utils/userinfo.h
+  utils/validation.cpp
+  utils/validation.h
+  utils/writecertassuantransaction.cpp
+  utils/writecertassuantransaction.h
+  utils/wsastarter.cpp
+  utils/wsastarter.h
+  view/anchorcache.cpp
+  view/anchorcache_p.h
+  view/errorlabel.cpp
+  view/errorlabel.h
+  view/formtextinput.cpp
+  view/formtextinput.h
+  view/htmllabel.cpp
+  view/htmllabel.h
+  view/infofield.cpp
+  view/infofield.h
+  view/keycacheoverlay.cpp
+  view/keycacheoverlay.h
+  view/keylistcontroller.cpp
+  view/keylistcontroller.h
+  view/keytreeview.cpp
+  view/keytreeview.h
+  view/netkeywidget.cpp
+  view/netkeywidget.h
+  view/nullpinwidget.cpp
+  view/nullpinwidget.h
+  view/openpgpkeycardwidget.cpp
+  view/openpgpkeycardwidget.h
+  view/p15cardwidget.cpp
+  view/p15cardwidget.h
+  view/padwidget.cpp
+  view/padwidget.h
+  view/pgpcardwidget.cpp
+  view/pgpcardwidget.h
+  view/pivcardwidget.cpp
+  view/pivcardwidget.h
+  view/searchbar.cpp
+  view/searchbar.h
+  view/smartcardwidget.cpp
+  view/smartcardwidget.h
+  view/tabwidget.cpp
+  view/tabwidget.h
+  view/urllabel.cpp
+  view/urllabel.h
+  view/waitwidget.cpp
+  view/waitwidget.h
+  view/welcomewidget.cpp
+  view/welcomewidget.h
 
   aboutdata.cpp
-  systrayicon.cpp
-  kleopatraapplication.cpp
-  mainwindow.cpp
-  main.cpp
+  aboutdata.h
   kleopatra.qrc
+  kleopatraapplication.cpp
+  kleopatraapplication.h
+  main.cpp
+  mainwindow.cpp
+  mainwindow.h
+  systrayicon.cpp
+  systrayicon.h
 )
 
 if(WIN32)
@@ -308,29 +549,20 @@ if(KLEO_MODEL_TEST)
 endif()
 
 ki18n_wrap_ui(_kleopatra_SRCS
-  dialogs/lookupcertificatesdialog.ui
   dialogs/ownertrustdialog.ui
   dialogs/selectchecklevelwidget.ui
-  dialogs/selftestdialog.ui
-  dialogs/adduseriddialog.ui
   dialogs/setinitialpindialog.ui
   dialogs/trustchainwidget.ui
-  dialogs/subkeyswidget.ui
   newcertificatewizard/listwidget.ui
-  newcertificatewizard/chooseprotocolpage.ui
-  newcertificatewizard/enterdetailspage.ui
-  newcertificatewizard/keycreationpage.ui
-  newcertificatewizard/resultpage.ui
-  newcertificatewizard/advancedsettingsdialog.ui
 )
 
 kconfig_add_kcfg_files(_kleopatra_SRCS
-  kcfg/tooltippreferences.kcfgc
   kcfg/emailoperationspreferences.kcfgc
   kcfg/fileoperationspreferences.kcfgc
+  kcfg/settings.kcfgc
   kcfg/smimevalidationpreferences.kcfgc
   kcfg/tagspreferences.kcfgc
-  kcfg/settings.kcfgc
+  kcfg/tooltippreferences.kcfgc
 )
 
 file(GLOB ICONS_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/icons/*-apps-kleopatra.png")
@@ -352,7 +584,6 @@ endif ()
 
 target_link_libraries(kleopatra_bin
   Gpgmepp
-  QGpgme
   ${_kleopatra_extra_libs}
   KF5::Libkleo
   KF5::Mime
@@ -363,6 +594,7 @@ target_link_libraries(kleopatra_bin
   KF5::CoreAddons
   KF5::ItemModels
   KF5::Crash
+  ${_kleopatra_mail_libs}
   Qt::Network
   Qt::PrintSupport # Printing secret keys
   ${_kleopatra_uiserver_extra_libs}
@@ -370,6 +602,12 @@ target_link_libraries(kleopatra_bin
   kleopatraclientcore
   ${_kleopatra_platform_libs}
 )
+
+if (QT_MAJOR_VERSION STREQUAL "6")
+    target_link_libraries(kleopatra_bin QGpgmeQt6)
+else()
+    target_link_libraries(kleopatra_bin QGpgme)
+endif()
 
 install(TARGETS kleopatra_bin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
@@ -379,9 +617,9 @@ install(
 )
 install(FILES data/org.kde.kleopatra.appdata.xml DESTINATION ${KDE_INSTALL_METAINFODIR})
 install(
-  FILES data/kleopatra_signencryptfiles.desktop
+  PROGRAMS data/kleopatra_signencryptfiles.desktop
         data/kleopatra_signencryptfolders.desktop
         data/kleopatra_decryptverifyfiles.desktop
         data/kleopatra_decryptverifyfolders.desktop
-  DESTINATION ${KDE_INSTALL_KSERVICES5DIR}/ServiceMenus
+  DESTINATION ${KDE_INSTALL_DATADIR}/kio/servicemenus
 )

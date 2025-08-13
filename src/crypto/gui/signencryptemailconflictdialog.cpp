@@ -21,12 +21,14 @@
 #include "utils/gui-helper.h"
 #include "utils/kleo_assert.h"
 
+#include <Libkleo/Compliance>
 #include <Libkleo/Stl_Util>
 #include <Libkleo/Formatting>
+#include <Libkleo/SystemInfo>
 
 #include <gpgme++/key.h>
 
-#include <kmime/kmime_header_parsing.h>
+#include <KMime/HeaderParsing>
 
 #include <KLocalizedString>
 #include <KColorScheme>
@@ -246,6 +248,9 @@ private:
 
     void updateComplianceStatus()
     {
+        if (!DeVSCompliance::isCompliant()) {
+            return;
+        }
         if (q->selectedProtocol() == UnknownProtocol ||
             (q->resolvedSigningKeys().empty() && q->resolvedEncryptionKeys().empty())) {
             return;
@@ -253,14 +258,14 @@ private:
         // Handle compliance
         bool de_vs = true;
         for (const auto &key: q->resolvedSigningKeys()) {
-            if (!IS_DE_VS(key) || keyValidity(key) < GpgME::UserID::Validity::Full) {
+            if (!key.isDeVs() || keyValidity(key) < GpgME::UserID::Validity::Full) {
                 de_vs = false;
                 break;
             }
         }
         if (de_vs) {
             for (const auto &key: q->resolvedEncryptionKeys()) {
-                if (!IS_DE_VS(key) || keyValidity(key) < GpgME::UserID::Validity::Full) {
+                if (!key.isDeVs() || keyValidity(key) < GpgME::UserID::Validity::Full) {
                     de_vs = false;
                     break;
                 }
@@ -269,26 +274,15 @@ private:
 
         auto btn = ui.buttonBox.button(QDialogButtonBox::Ok);
 
-        btn->setIcon(QIcon::fromTheme(de_vs
-                    ? QStringLiteral("security-high")
-                    : QStringLiteral("security-medium")));
-        btn->setStyleSheet(QStringLiteral("background-color: ") + (de_vs
-                    ? KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::PositiveBackground).color().name()
-                    : KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::NegativeBackground).color().name()));
-        ui.complianceLB.setText(de_vs
-                ? i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                    "%1 communication possible.", Formatting::deVsString())
-                : i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                    "%1 communication not possible.", Formatting::deVsString()));
+        DeVSCompliance::decorate(btn, de_vs);
+        ui.complianceLB.setText(DeVSCompliance::name(de_vs));
         ui.complianceLB.setVisible(true);
     }
 
     void updateDialogStatus()
     {
         ui.setOkButtonEnabled(q->isComplete());
-        if (Kleo::gpgComplianceP("de-vs")) {
-            updateComplianceStatus();
-        }
+        updateComplianceStatus();
     }
     void slotCompleteChanged()
     {
@@ -308,7 +302,7 @@ private:
         const QObject *const s = q->sender();
         const Protocol proto = q->selectedProtocol();
         QPointer<CertificateSelectionDialog> dlg;
-        Q_FOREACH (const CertificateSelectionLine &l, ui.signers)
+        for (const CertificateSelectionLine &l : std::as_const(ui.signers))
             if (s == l.toolButton()) {
                 dlg = create_signing_certificate_selection_dialog(q, proto, l.mailboxText());
                 if (dlg->exec()) {
@@ -317,7 +311,7 @@ private:
                 // ### switch to key.protocol(), in case proto == UnknownProtocol
                 break;
             }
-        Q_FOREACH (const CertificateSelectionLine &l, ui.recipients)
+        for (const CertificateSelectionLine &l : std::as_const(ui.recipients))
             if (s == l.toolButton()) {
                 dlg = create_encryption_certificate_selection_dialog(q, proto, l.mailboxText());
                 if (dlg->exec()) {

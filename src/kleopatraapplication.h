@@ -32,7 +32,7 @@ public:
      * call is done and our init / call might be forwarded to
      * another instance. */
     KleopatraApplication(int &argc, char *argv[]);
-    ~KleopatraApplication();
+    ~KleopatraApplication() override;
 
     /** Initialize the application. Without calling init any
      * other call to KleopatraApplication will result in undefined behavior
@@ -94,6 +94,13 @@ Q_SIGNALS:
     /* Emitted from slotActivateRequested to enable setting the
      * correct exitValue */
     void setExitValue(int value);
+
+    void configurationChanged();
+
+private Q_SLOTS:
+    // used as URL handler for URLs with schemes that shall be blocked
+    void blockUrl(const QUrl &url);
+    void startGpgAgent();
 
 private:
     class Private;

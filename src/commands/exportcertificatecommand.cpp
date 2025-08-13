@@ -15,6 +15,7 @@
 
 #include "command_p.h"
 
+#include <utils/applicationstate.h>
 #include <utils/filedialog.h>
 
 #include <Libkleo/Classify>
@@ -30,7 +31,6 @@
 
 #include <QMap>
 #include <QPointer>
-#include <QRegExp>
 #include <QFileInfo>
 
 #include <algorithm>
@@ -49,7 +49,7 @@ class ExportCertificateCommand::Private : public Command::Private
     }
 public:
     explicit Private(ExportCertificateCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
     void startExportJob(GpgME::Protocol protocol, const std::vector<Key> &keys);
     void cancelJobs();
     void exportResult(const GpgME::Error &, const QByteArray &);
@@ -167,7 +167,7 @@ bool ExportCertificateCommand::Private::requestFileNames(GpgME::Protocol protoco
             return true;
         }
 
-        /* Unkown protocol ask for first PGP Export file name */
+        /* Unknown protocol ask for first PGP Export file name */
         if (fileNames[GpgME::OpenPGP].isEmpty() && !requestFileNames(GpgME::OpenPGP)) {
             return false;
         }
@@ -179,8 +179,7 @@ bool ExportCertificateCommand::Private::requestFileNames(GpgME::Protocol protoco
         return true;
     }
 
-    KConfigGroup config(KSharedConfig::openConfig(), "ExportDialog");
-    const auto lastDir = config.readEntry("LastDirectory", QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+    const auto lastDir = ApplicationState::lastUsedExportDirectory();
 
     QString proposedFileName = lastDir + QLatin1Char('/');
     if (keys().size() == 1) {
@@ -202,9 +201,13 @@ bool ExportCertificateCommand::Private::requestFileNames(GpgME::Protocol protoco
             /* If the user has already selected a PGP file name then use that as basis
              * for a proposal for the S/MIME file. */
             proposedFileName = fileNames[GpgME::OpenPGP];
-            proposedFileName.replace(QRegExp(QStringLiteral(".asc$")), QStringLiteral(".pem"));
-            proposedFileName.replace(QRegExp(QStringLiteral(".gpg$")), QStringLiteral(".der"));
-            proposedFileName.replace(QRegExp(QStringLiteral(".pgp$")), QStringLiteral(".der"));
+            const int idx = proposedFileName.size() - 4;
+            if (proposedFileName.endsWith(QLatin1String(".asc"))) {
+                proposedFileName.replace(idx, 4, QLatin1String(".pem"));
+            }
+            if (proposedFileName.endsWith(QLatin1String(".gpg")) || proposedFileName.endsWith(QLatin1String(".pgp"))) {
+                proposedFileName.replace(idx, 4, QLatin1String(".der"));
+            }
         }
     }
 
@@ -234,7 +237,7 @@ bool ExportCertificateCommand::Private::requestFileNames(GpgME::Protocol protoco
     }
 
     fileNames[protocol] = fname;
-    config.writeEntry("LastDirectory", fi.absolutePath());
+    ApplicationState::setLastUsedExportDirectory(fi.absolutePath());
     return !fname.isEmpty();
 }
 
@@ -251,8 +254,9 @@ void ExportCertificateCommand::Private::startExportJob(GpgME::Protocol protocol,
     std::unique_ptr<ExportJob> job(backend->publicKeyExportJob(!binary));
     Q_ASSERT(job.get());
 
-    connect(job.get(), SIGNAL(result(GpgME::Error,QByteArray)),
-            q, SLOT(exportResult(GpgME::Error,QByteArray)));
+    connect(job.get(), &QGpgME::ExportJob::result, q, [this](const GpgME::Error &result, const QByteArray &keyData) {
+        exportResult(result, keyData);
+    });
 
     connect(job.get(), &Job::progress,
             q, &Command::progress);

@@ -11,6 +11,8 @@
 
 #include <commands/importcertificatescommand.h>
 
+#include <gpgme++/global.h>
+
 namespace Kleo
 {
 namespace Commands
@@ -25,6 +27,9 @@ public:
     explicit LookupCertificatesCommand(const QString &fingerPrint, KeyListController *parent);
     ~LookupCertificatesCommand() override;
 
+    void setProtocol(GpgME::Protocol protocol);
+    GpgME::Protocol protocol() const;
+
 private:
     void doStart() override;
     void doCancel() override;
@@ -33,13 +38,6 @@ private:
     class Private;
     inline Private *d_func();
     inline const Private *d_func() const;
-    Q_PRIVATE_SLOT(d_func(), void slotSearchTextChanged(QString))
-    Q_PRIVATE_SLOT(d_func(), void slotNextKey(GpgME::Key))
-    Q_PRIVATE_SLOT(d_func(), void slotKeyListResult(GpgME::KeyListResult))
-    Q_PRIVATE_SLOT(d_func(), void slotImportRequested(std::vector<GpgME::Key>))
-    Q_PRIVATE_SLOT(d_func(), void slotDetailsRequested(GpgME::Key))
-    Q_PRIVATE_SLOT(d_func(), void slotSaveAsRequested(std::vector<GpgME::Key>))
-    Q_PRIVATE_SLOT(d_func(), void slotDialogRejected())
 };
 
 }

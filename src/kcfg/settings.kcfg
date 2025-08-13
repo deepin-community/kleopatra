@@ -4,6 +4,123 @@
       xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
       http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
  <kcfgfile name="kleopatrarc" />
+ <group name="CertificateCreationWizard">
+   <entry key="CN_placeholder" name="cnPlaceholder" type="String">
+     <label>Placeholder for CN</label>
+     <whatsthis>This text will be used as placeholder text for the common name (CN) field of S/MIME certificates.</whatsthis>
+     <default></default>
+   </entry>
+   <entry key="CN_prefill" name="prefillCN" type="Bool">
+     <label>Prefill CN automatically</label>
+     <whatsthis>If true, then the common name (CN) field of S/MIME certificates will be prefilled with information gathered from the system,
+         e.g., from the email settings of the desktop or, on Windows, from the Active Directory.</whatsthis>
+     <default>true</default>
+   </entry>
+   <entry key="EMAIL_placeholder" name="emailPlaceholder" type="String">
+     <label>Placeholder for EMAIL</label>
+     <whatsthis>This text will be used as placeholder text for the email address field of OpenPGP and S/MIME certificates.</whatsthis>
+     <default></default>
+   </entry>
+   <entry key="EMAIL_prefill" name="prefillEmail" type="Bool">
+     <label>Prefill EMAIL automatically</label>
+     <whatsthis>If true, then the email address field of OpenPGP and S/MIME certificates will be prefilled with information gathered from the system,
+         e.g., from the email settings of the desktop or, on Windows, from the Active Directory.</whatsthis>
+     <default>true</default>
+   </entry>
+   <entry key="NAME_placeholder" name="namePlaceholder" type="String">
+     <label>Placeholder for NAME</label>
+     <whatsthis>This text will be used as placeholder text for the name field of OpenPGP certificates.</whatsthis>
+     <default></default>
+   </entry>
+   <entry key="NAME_prefill" name="prefillName" type="Bool">
+     <label>Prefill NAME automatically</label>
+     <whatsthis>If true, then the name field of OpenPGP certificates will be prefilled with information gathered from the system,
+         e.g., from the email settings of the desktop or, on Windows, from the Active Directory.</whatsthis>
+     <default>true</default>
+   </entry>
+   <entry key="ValidityPeriodInDays" type="Int">
+     <label>Default validity period</label>
+     <tooltip>Specifies the default validity period of new OpenPGP keys in days.</tooltip>
+     <whatsthis>This setting specifies how many days a new OpenPGP key is valid by default, or, in other words, after how many days the key will expire. Set this to 0 for unlimited validity. If this setting is not set or if it is set to a negative value, then new OpenPGP keys will be valid for two years (possibly clamped to the allowed minimum or maximum validity period) by default.</whatsthis>
+     <default>-1</default>
+   </entry>
+   <entry key="ValidityPeriodInDaysMin" type="Int">
+     <label>Minimum validity period</label>
+     <tooltip>Specifies the minimum validity period of new OpenPGP keys in days.</tooltip>
+     <whatsthis>This setting specifies how many days a new OpenPGP key is valid at least, or, in other words, after how many days the new key will expire at the earliest.</whatsthis>
+     <default>0</default>
+   </entry>
+   <entry key="ValidityPeriodInDaysMax" type="Int">
+     <label>Maximum validity period</label>
+     <tooltip>Specifies the maximum validity period of new OpenPGP keys in days.</tooltip>
+     <whatsthis>This setting specifies how many days a new OpenPGP key is valid at most, or, in other words, after how many days the new key will expire at the latest. If this setting is not set or if it is set to a negative value, then unlimited validity is allowed.</whatsthis>
+     <default>-1</default>
+   </entry>
+   <entry key="HideAdvanced" type="Bool">
+     <label>Hide advanced settings</label>
+     <whatsthis>If true, hides the advanced settings button in the new certificate wizard.</whatsthis>
+     <default>false</default>
+   </entry>
+ </group>
+ <group name="ChecksumOperations">
+     <entry key="checksum-definition-id" name="ChecksumDefinitionId" type="String">
+        <label>Checksum program to use when creating checksum files</label>
+        <default>sha256sum</default>
+     </entry>
+ </group>
+ <group name="CMS">
+   <entry key="Enabled" name="cmsEnabled" type="Bool">
+     <label>Enable S/MIME</label>
+     <tooltip>Enables support for S/MIME (CMS).</tooltip>
+     <whatsthis>If false, then Kleopatra's main UI will not offer any functionality related to S/MIME (CMS).</whatsthis>
+     <default>true</default>
+   </entry>
+   <entry key="AllowCertificateCreation" name="cmsCertificateCreationAllowed" type="Bool">
+     <label>Allow S/MIME certificate creation</label>
+     <tooltip>Allows the creation of S/MIME certificate signing requests.</tooltip>
+     <whatsthis>If false, then Kleopatra will not offer the creation of S/MIME certificate signing requests.</whatsthis>
+     <default>true</default>
+   </entry>
+   <entry key="AllowSigning" name="cmsSigningAllowed" type="Bool">
+     <label>Allow signing with S/MIME certificates</label>
+     <tooltip>Allows signing of text or files with S/MIME certificates.</tooltip>
+     <whatsthis>If false, then Kleopatra will not offer functionality for creating signatures with S/MIME certificates.</whatsthis>
+     <default>true</default>
+   </entry>
+ </group>
+ <group name="ConfigurationDialog">
+   <entry name="ShowAppearanceConfiguration" type="Bool">
+     <label>Show appearance configuration</label>
+     <default>true</default>
+   </entry>
+   <entry name="ShowCryptoOperationsConfiguration" type="Bool">
+     <label>Show crypto operations configuration</label>
+     <default>true</default>
+   </entry>
+   <entry name="ShowDirectoryServicesConfiguration" type="Bool">
+     <label>Show directory services configuration</label>
+     <default>true</default>
+   </entry>
+   <entry name="ShowGnuPGSystemConfiguration" type="Bool">
+     <label>Show GnuPG system configuration</label>
+     <default>true</default>
+   </entry>
+   <entry name="ShowSmartCardsConfiguration" type="Bool">
+     <label>Show smart cards configuration</label>
+     <default>true</default>
+   </entry>
+   <entry name="ShowSMimeValidationConfiguration" type="Bool">
+     <label>Show S/MIME validation configuration</label>
+     <default>true</default>
+   </entry>
+ </group>
+ <group name="DN">
+   <entry name="AttributeOrder" type="StringList">
+     <label>DN-Attribute Order</label>
+     <tooltip>Specifies the display order of the DN attributes of X.509 certificates.</tooltip>
+     <default></default>
+   </entry>
+ </group>
  <group name="Groups">
    <entry name="GroupsEnabled" type="Bool">
      <label>Enable Groups</label>
@@ -11,5 +128,43 @@
      <whatsthis>Enable usage of groups of keys to create lists of recipients.</whatsthis>
      <default>true</default>
    </entry>
+ </group>
+ <group name="Import">
+   <entry name="RetrieveSignerKeysAfterImport" type="Bool">
+     <label>Retrieve signer keys after import</label>
+     <whatsthis>If enabled, then Kleopatra will automatically try to retrieve the keys
+         that were used to certify the user ids of newly imported OpenPGP keys. This is
+         useful in combination with trusted introducers.</whatsthis>
+     <default>false</default>
+   </entry>
+ </group>
+ <group name="Privacy">
+   <entry name="BlockedUrlSchemes" type="StringList">
+     <label>URL schemes to block</label>
+     <whatsthis>This is a list of URL schemes that shall be blocked by the application.
+         This can be used to prevent the application from opening external applications for certain URLs.</whatsthis>
+     <default></default>
+   </entry>
+ </group>
+ <group name="Smartcard">
+   <entry name="AlwaysSearchCardOnKeyserver" type="Bool">
+     <label>Always search smartcard certificates on keyserver</label>
+     <tooltip>Searches for the certificates belonging the smartcard keys on the configured keyserver.</tooltip>
+     <whatsthis>Searches on keyservers regardless of the protocol for the smartcards key, regardless
+        of the keyserver protocol. Default behavior is to only do this for LDAP keyservers.</whatsthis>
+     <default>false</default>
+   </entry>
+   <entry key="AutoLoadP15Certs" name="autoLoadP15Certs" type="Bool">
+     <label>Try to load S/MIME certificates from PKCS#15 smartcards</label>
+     <tooltip>Automatically load S/MIME certificates from PKCS#15 (CardOS) smartcards</tooltip>
+     <whatsthis>If true, then Kleopatra will call gpgsm --learn if a PKCS#15 Smartcard is inserted with unknown certificates. This can take a while and blocks the smartcard while the command is running.</whatsthis>
+     <default>true</default>
+   </entry>
+ </group>
+ <group name="General">
+     <entry name="ProfilesDisabled" type="Bool">
+        <label>Disable profile settings</label>
+        <default>false</default>
+     </entry>
  </group>
 </kcfg>

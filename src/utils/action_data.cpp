@@ -20,7 +20,7 @@
 QAction *Kleo::createAction(const action_data &ad, KActionCollection *coll)
 {
 
-    QAction *const a = ad.toggle ? new KToggleAction(coll) : new QAction(coll);
+    QAction *const a = ad.actionType == KFToggleAction ? new KToggleAction(coll) : new QAction(coll);
     a->setObjectName(QLatin1String(ad.name));
     a->setText(ad.text);
     if (!ad.tooltip.isEmpty()) {
@@ -29,14 +29,14 @@ QAction *Kleo::createAction(const action_data &ad, KActionCollection *coll)
     if (ad.icon) {
         a->setIcon(QIcon::fromTheme(QLatin1String(ad.icon)));
     }
-    if (ad.receiver && ad.slot) {
-        if (ad.toggle) {
-            QObject::connect(a, SIGNAL(toggled(bool)), ad.receiver, ad.slot);
+    if (ad.receiver && ad.func) {
+        if (ad.actionType == KFToggleAction) {
+            QObject::connect(a, &KToggleAction::toggled, ad.receiver, ad.func);
         } else {
-            QObject::connect(a, SIGNAL(triggered()), ad.receiver, ad.slot);
+            QObject::connect(a, &QAction::triggered, ad.receiver, ad.func);
         }
     }
-    a->setEnabled(ad.enabled);
+    a->setEnabled(ad.actionState == Enabled);
     coll->addAction(QLatin1String(ad.name), a);
     return a;
 }
@@ -51,9 +51,9 @@ QAction *Kleo::make_action_from_data(const action_data &ad, KActionCollection *c
     return a;
 }
 
-void Kleo::make_actions_from_data(const action_data *ads, unsigned int size, KActionCollection *coll)
+void Kleo::make_actions_from_data(const std::vector<action_data> &data, KActionCollection *coll)
 {
-    for (unsigned int i = 0; i < size; ++i) {
-        coll->addAction(QLatin1String(ads[i].name), make_action_from_data(ads[i], coll));
+    for (const auto &actionData : data) {
+        coll->addAction(QLatin1String(actionData.name), make_action_from_data(actionData, coll));
     }
 }

@@ -3,11 +3,13 @@
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2017 Bundesamt für Sicherheit in der Informationstechnik
     SPDX-FileContributor: Intevation GmbH
-    SPDX-FileCopyrightText: 2020 g10 Code GmbH
+    SPDX-FileCopyrightText: 2020, 2022 g10 Code GmbH
     SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+
+#include <config-kleopatra.h>
 
 #include "pgpcardwidget.h"
 
@@ -17,7 +19,9 @@
 
 #include "commands/createcsrforcardkeycommand.h"
 #include "commands/createopenpgpkeyfromcardkeyscommand.h"
+#include "commands/openpgpgeneratecardkeycommand.h"
 
+#include "smartcard/algorithminfo.h"
 #include "smartcard/openpgpcard.h"
 #include "smartcard/readerstatus.h"
 
@@ -55,6 +59,11 @@ using namespace Kleo;
 using namespace Kleo::Commands;
 using namespace Kleo::SmartCard;
 
+static QDebug operator<<(QDebug s, const std::string &string)
+{
+    return s << QString::fromStdString(string);
+}
+
 namespace {
 class GenKeyThread: public QThread
 {
@@ -78,19 +87,50 @@ class GenKeyThread: public QThread
         }
     protected:
         void run() override {
-            auto ei = new GpgME::GpgGenCardKeyInteractor(mSerial);
-            ei->setAlgo(GpgME::GpgGenCardKeyInteractor::RSA);
-            ei->setKeySize(QByteArray::fromStdString(mParams.algorithm).toInt());
+            // the index of the curves in this list has to match the enum values
+            // minus 1 of GpgGenCardKeyInteractor::Curve
+            static const std::vector<std::string> curves = {
+                "curve25519",
+#ifdef GPGMEPP_SUPPORTS_SET_CURVE
+                "curve448",
+                "nistp256",
+                "nistp384",
+                "nistp521",
+                "brainpoolP256r1",
+                "brainpoolP384r1",
+                "brainpoolP512r1",
+                "secp256k1", // keep it, even if we don't support it in Kleopatra
+#endif
+            };
+
+            auto ei = std::make_unique<GpgME::GpgGenCardKeyInteractor>(mSerial);
+            if (mParams.algorithm.starts_with("rsa")) {
+                ei->setAlgo(GpgME::GpgGenCardKeyInteractor::RSA);
+                ei->setKeySize(QByteArray::fromStdString(mParams.algorithm.substr(3)).toInt());
+            } else {
+                ei->setAlgo(GpgME::GpgGenCardKeyInteractor::ECC);
+                const auto curveIt = std::find(curves.cbegin(), curves.cend(), mParams.algorithm);
+                if (curveIt != curves.end()) {
+#ifdef GPGMEPP_SUPPORTS_SET_CURVE
+                    ei->setCurve(static_cast<GpgME::GpgGenCardKeyInteractor::Curve>(curveIt - curves.cbegin() + 1));
+#endif
+                } else {
+                    qCWarning(KLEOPATRA_LOG) << this << __func__ << "Invalid curve name:" << mParams.algorithm;
+                    mErr = GpgME::Error::fromCode(GPG_ERR_INV_VALUE);
+                    return;
+                }
+            }
             ei->setNameUtf8(mParams.name.toStdString());
             ei->setEmailUtf8(mParams.email.toStdString());
             ei->setDoBackup(mParams.backup);
 
             const auto ctx = std::shared_ptr<GpgME::Context> (GpgME::Context::createForProtocol(GpgME::OpenPGP));
+            ctx->setFlag("extended-edit", "1"); // we want to be able to select all curves
             QGpgME::QByteArrayDataProvider dp;
             GpgME::Data data(&dp);
 
-            mErr = ctx->cardEdit(GpgME::Key(), std::unique_ptr<GpgME::EditInteractor> (ei), data);
-            mBkpFile = ei->backupFileName();
+            mErr = ctx->cardEdit(GpgME::Key(), std::move(ei), data);
+            mBkpFile = static_cast<GpgME::GpgGenCardKeyInteractor*>(ctx->lastCardEditInteractor())->backupFileName();
         }
 
     private:
@@ -147,6 +187,7 @@ PGPCardWidget::PGPCardWidget(QWidget *parent):
         {
             auto button = new QPushButton;
             button->setIcon(QIcon::fromTheme(QStringLiteral("cell_edit")));
+            button->setAccessibleName(i18nc("@action:button", "Edit"));
             button->setToolTip(i18n("Change"));
             cardInfoGrid->addWidget(button, row, 2);
             connect(button, &QPushButton::clicked, this, &PGPCardWidget::changeNameRequested);
@@ -162,6 +203,7 @@ PGPCardWidget::PGPCardWidget(QWidget *parent):
         {
             auto button = new QPushButton;
             button->setIcon(QIcon::fromTheme(QStringLiteral("cell_edit")));
+            button->setAccessibleName(i18nc("@action:button", "Edit"));
             button->setToolTip(i18n("Change"));
             cardInfoGrid->addWidget(button, row, 2);
             connect(button, &QPushButton::clicked, this, &PGPCardWidget::changeUrlRequested);
@@ -179,6 +221,7 @@ PGPCardWidget::PGPCardWidget(QWidget *parent):
     mKeysWidget = new OpenPGPKeyCardWidget{this};
     areaVLay->addWidget(mKeysWidget);
     connect(mKeysWidget, &OpenPGPKeyCardWidget::createCSRRequested, this, &PGPCardWidget::createCSR);
+    connect(mKeysWidget, &OpenPGPKeyCardWidget::generateKeyRequested, this, &PGPCardWidget::generateKey);
 
     areaVLay->addWidget(new KSeparator(Qt::Horizontal));
 
@@ -311,8 +354,7 @@ void PGPCardWidget::genKeyDone(const GpgME::Error &err, const std::string &backu
 {
     if (err) {
         KMessageBox::error(this, i18nc("@info",
-                           "Failed to generate new key: %1", QString::fromLatin1(err.asString())),
-                           i18nc("@title", "Error"));
+                           "Failed to generate new key: %1", QString::fromLatin1(err.asString())));
         return;
     }
     if (err.isCanceled()) {
@@ -326,8 +368,7 @@ void PGPCardWidget::genKeyDone(const GpgME::Error &err, const std::string &backu
                                                          QStringLiteral("%1 (*.gpg)").arg(i18n("Backup Key")));
         if (!target.isEmpty() && !QFile::copy(bkpFile, target)) {
             KMessageBox::error(this, i18nc("@info",
-                               "Failed to move backup. The backup key is still stored under: %1", bkpFile),
-                               i18nc("@title", "Error"));
+                               "Failed to move backup. The backup key is still stored under: %1", bkpFile));
         } else if (!target.isEmpty()) {
             QFile::remove(bkpFile);
         }
@@ -341,6 +382,12 @@ void PGPCardWidget::genKeyDone(const GpgME::Error &err, const std::string &backu
 
 void PGPCardWidget::genkeyRequested()
 {
+    const auto pgpCard = ReaderStatus::instance()->getCard<OpenPGPCard>(mRealSerial);
+    if (!pgpCard) {
+        KMessageBox::error(this, i18n("Failed to find the OpenPGP card with the serial number: %1", QString::fromStdString(mRealSerial)));
+        return;
+    }
+
     if (!mCardIsEmpty) {
         auto ret = KMessageBox::warningContinueCancel(this,
                 i18n("The existing keys on this card will be <b>deleted</b> "
@@ -357,16 +404,20 @@ void PGPCardWidget::genkeyRequested()
     }
 
     auto dlg = new GenCardKeyDialog(GenCardKeyDialog::AllKeyAttributes, this);
-    std::vector<std::pair<std::string, QString>> algos = {
-        { "1024", QStringLiteral("RSA 1024") },
-        { "2048", QStringLiteral("RSA 2048") },
-        { "3072", QStringLiteral("RSA 3072") }
+#ifdef GPGMEPP_SUPPORTS_SET_CURVE
+    dlg->setSupportedAlgorithms(pgpCard->supportedAlgorithms(), pgpCard->defaultAlgorithm());
+#else
+    std::vector<AlgorithmInfo> algos = {
+        { "curve25519", i18nc("@info", "ECC (Curve25519)") },
+        { "rsa2048", i18nc("@info", "RSA 2048") },
+        { "rsa3072", i18nc("@info", "RSA 3072") },
     };
     // There is probably a better way to check for capabilities
     if (mIs21) {
-        algos.push_back({"4096", QStringLiteral("RSA 4096")});
+        algos.push_back({"rsa4096", i18nc("@info", "RSA 4096")});
     }
-    dlg->setSupportedAlgorithms(algos, "2048");
+    dlg->setSupportedAlgorithms(algos, "rsa2048");
+#endif
     connect(dlg, &QDialog::accepted, this, [this, dlg] () {
             doGenKey(dlg);
             dlg->deleteLater();
@@ -390,20 +441,17 @@ void PGPCardWidget::changeNameRequested()
         // Some additional restrictions imposed by gnupg
         if (text.contains(QLatin1Char('<'))) {
             KMessageBox::error(this, i18nc("@info",
-                               "The \"<\" character may not be used."),
-                               i18nc("@title", "Error"));
+                               "The \"<\" character may not be used."));
             continue;
         }
         if (text.contains(QLatin1String("  "))) {
             KMessageBox::error(this, i18nc("@info",
-                               "Double spaces are not allowed"),
-                               i18nc("@title", "Error"));
+                               "Double spaces are not allowed"));
             continue;
         }
         if (text.size() > 38) {
             KMessageBox::error(this, i18nc("@info",
-                               "The size of the name may not exceed 38 characters."),
-                               i18nc("@title", "Error"));
+                               "The size of the name may not exceed 38 characters."));
         }
         break;
     }
@@ -418,15 +466,16 @@ void PGPCardWidget::changeNameRequested()
     }
 
     const QByteArray command = QByteArrayLiteral("SCD SETATTR DISP-NAME ") + formatted.toUtf8();
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, command, this, "changeNameResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, command, this, [this](const GpgME::Error &err) {
+        changeNameResult(err);
+    });
 }
 
 void PGPCardWidget::changeNameResult(const GpgME::Error &err)
 {
     if (err) {
         KMessageBox::error(this, i18nc("@info",
-                           "Name change failed: %1", QString::fromLatin1(err.asString())),
-                           i18nc("@title", "Error"));
+                           "Name change failed: %1", QString::fromLatin1(err.asString())));
         return;
     }
     if (!err.isCanceled()) {
@@ -452,8 +501,7 @@ void PGPCardWidget::changeUrlRequested()
         // Some additional restrictions imposed by gnupg
         if (text.size() > 254) {
             KMessageBox::error(this, i18nc("@info",
-                               "The size of the URL may not exceed 254 characters."),
-                               i18nc("@title", "Error"));
+                               "The size of the URL may not exceed 254 characters."));
         }
         break;
     }
@@ -465,15 +513,16 @@ void PGPCardWidget::changeUrlRequested()
     }
 
     const QByteArray command = QByteArrayLiteral("SCD SETATTR PUBKEY-URL ") + text.toUtf8();
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, command, this, "changeUrlResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, command, this, [this](const GpgME::Error &err) {
+        changeUrlResult(err);
+    });
 }
 
 void PGPCardWidget::changeUrlResult(const GpgME::Error &err)
 {
     if (err) {
         KMessageBox::error(this, i18nc("@info",
-                           "URL change failed: %1", QString::fromLatin1(err.asString())),
-                           i18nc("@title", "Error"));
+                           "URL change failed: %1", QString::fromLatin1(err.asString())));
         return;
     }
     if (!err.isCanceled()) {
@@ -500,6 +549,17 @@ void PGPCardWidget::createCSR(const std::string &keyref)
     auto cmd = new CreateCSRForCardKeyCommand(keyref, mRealSerial, OpenPGPCard::AppName, this);
     this->setEnabled(false);
     connect(cmd, &CreateCSRForCardKeyCommand::finished,
+            this, [this]() {
+                this->setEnabled(true);
+            });
+    cmd->start();
+}
+
+void PGPCardWidget::generateKey(const std::string &keyref)
+{
+    auto cmd = new OpenPGPGenerateCardKeyCommand(keyref, mRealSerial, this);
+    this->setEnabled(false);
+    connect(cmd, &OpenPGPGenerateCardKeyCommand::finished,
             this, [this]() {
                 this->setEnabled(true);
             });

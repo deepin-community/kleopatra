@@ -23,7 +23,7 @@ class HeaderView : public QHeaderView
     Q_OBJECT
 public:
     explicit HeaderView(Qt::Orientation o, QWidget *parent = nullptr);
-    ~HeaderView();
+    ~HeaderView() override;
 
     void setSectionSizes(const std::vector<int> &sizes);
     std::vector<int> sectionSizes() const;
@@ -36,8 +36,6 @@ private:
 private:
     class Private;
     kdtools::pimpl_ptr<Private> d;
-    Q_PRIVATE_SLOT(d, void _klhv_slotSectionCountChanged(int, int))
-    Q_PRIVATE_SLOT(d, void _klhv_slotSectionResized(int, int, int))
 };
 
 }

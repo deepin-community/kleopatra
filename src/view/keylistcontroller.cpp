@@ -3,6 +3,7 @@
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2007 Klarälvdalens Datakonsult AB
+    SPDX-FileCopyrightText: 2022 Felix Tiede
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -16,11 +17,19 @@
 
 #include <utils/action_data.h>
 
+#include <settings.h>
 #include "tooltippreferences.h"
 #include "kleopatra_debug.h"
 #include "commands/exportcertificatecommand.h"
 #include "commands/exportopenpgpcertstoservercommand.h"
-#include "commands/exportsecretkeycommand.h"
+#ifdef MAILAKONADI_ENABLED
+#include "commands/exportopenpgpcerttoprovidercommand.h"
+#endif // MAILAKONADI_ENABLED
+#ifdef QGPGME_SUPPORTS_SECRET_KEY_EXPORT
+# include "commands/exportsecretkeycommand.h"
+#else
+# include "commands/exportsecretkeycommand_old.h"
+#endif
 #include "commands/importcertificatefromfilecommand.h"
 #include "commands/changepassphrasecommand.h"
 #include "commands/lookupcertificatescommand.h"
@@ -42,11 +51,14 @@
 #include "commands/certifycertificatecommand.h"
 #include "commands/revokecertificationcommand.h"
 #include "commands/adduseridcommand.h"
-#include "commands/newcertificatecommand.h"
+#include "commands/newcertificatesigningrequestcommand.h"
+#include "commands/newopenpgpcertificatecommand.h"
 #include "commands/checksumverifyfilescommand.h"
 #include "commands/checksumcreatefilescommand.h"
 #include "commands/exportpaperkeycommand.h"
+#include "commands/revokekeycommand.h"
 
+#include <Libkleo/Algorithm>
 #include <Libkleo/KeyCache>
 #include <Libkleo/KeyListModel>
 #include <Libkleo/Formatting>
@@ -62,11 +74,18 @@
 #include <QAction>
 
 #include <algorithm>
+#include <iterator>
+
+// needed for GPGME_VERSION_NUMBER
+#include <gpgme.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
 using namespace Kleo::SmartCard;
 using namespace GpgME;
+#ifndef QGPGME_SUPPORTS_SECRET_KEY_EXPORT
+using Kleo::Commands::Compat::ExportSecretKeyCommand;
+#endif
 
 class KeyListController::Private
 {
@@ -120,7 +139,7 @@ public:
             Q_EMIT q->message(what);
         }
     }
-    void slotActionTriggered();
+    void slotActionTriggered(QAction *action);
     void slotCurrentViewChanged(QAbstractItemView *view)
     {
         if (view && !std::binary_search(views.cbegin(), views.cend(), view)) {
@@ -150,6 +169,7 @@ private:
     QPointer<TabWidget> tabWidget;
     QPointer<QAbstractItemView> currentView;
     QPointer<AbstractKeyListModel> flatModel, hierarchicalModel;
+    std::vector<QMetaObject::Connection> m_connections;
 };
 
 KeyListController::Private::Private(KeyListController *qq)
@@ -162,10 +182,8 @@ KeyListController::Private::Private(KeyListController *qq)
       flatModel(),
       hierarchicalModel()
 {
-    connect(KeyCache::mutableInstance().get(), SIGNAL(added(GpgME::Key)),
-            q, SLOT(slotAddKey(GpgME::Key)));
-    connect(KeyCache::mutableInstance().get(), SIGNAL(aboutToRemove(GpgME::Key)),
-            q, SLOT(slotAboutToRemoveKey(GpgME::Key)));
+    connect(KeyCache::instance().get(), &KeyCache::added, q, [this](const GpgME::Key &key) { slotAddKey(key); });
+    connect(KeyCache::instance().get(), &KeyCache::aboutToRemove, q, [this](const GpgME::Key &key) { slotAboutToRemoveKey(key); });
 }
 
 KeyListController::Private::~Private() {}
@@ -285,16 +303,6 @@ QWidget *KeyListController::parentWidget() const
     return d->parentWidget;
 }
 
-static const struct {
-    const char *signal;
-    const char *slot;
-} tabs2controller[] = {
-    { SIGNAL(viewAdded(QAbstractItemView*)),            SLOT(addView(QAbstractItemView*))                },
-    { SIGNAL(viewAboutToBeRemoved(QAbstractItemView*)), SLOT(removeView(QAbstractItemView*))             },
-    { SIGNAL(currentViewChanged(QAbstractItemView*)),   SLOT(slotCurrentViewChanged(QAbstractItemView*)) },
-};
-static const unsigned int numTabs2Controller = sizeof tabs2controller / sizeof * tabs2controller;
-
 void KeyListController::Private::connectTabWidget()
 {
     if (!tabWidget) {
@@ -303,9 +311,11 @@ void KeyListController::Private::connectTabWidget()
     const auto views = tabWidget->views();
     std::for_each(views.cbegin(), views.cend(),
                   [this](QAbstractItemView *view) { addView(view); });
-    for (unsigned int i = 0; i < numTabs2Controller; ++i) {
-        connect(tabWidget, tabs2controller[i].signal, q, tabs2controller[i].slot);
-    }
+
+    m_connections.reserve(3);
+    m_connections.push_back(connect(tabWidget, &TabWidget::viewAdded, q, &KeyListController::addView));
+    m_connections.push_back(connect(tabWidget, &TabWidget::viewAboutToBeRemoved, q, &KeyListController::removeView));
+    m_connections.push_back(connect(tabWidget, &TabWidget::currentViewChanged, q, [this](QAbstractItemView *view) { slotCurrentViewChanged(view); }));
 }
 
 void KeyListController::Private::disconnectTabWidget()
@@ -313,9 +323,11 @@ void KeyListController::Private::disconnectTabWidget()
     if (!tabWidget) {
         return;
     }
-    for (unsigned int i = 0; i < numTabs2Controller; ++i) {
-        disconnect(tabWidget, tabs2controller[i].signal, q, tabs2controller[i].slot);
+    for (const auto &connection : m_connections) {
+        disconnect(connection);
     }
+    m_connections.clear();
+
     const auto views = tabWidget->views();
     std::for_each(views.cbegin(), views.cend(),
                   [this](QAbstractItemView *view) { removeView(view); });
@@ -343,137 +355,169 @@ TabWidget *KeyListController::tabWidget() const
 
 void KeyListController::createActions(KActionCollection *coll)
 {
-
-    const action_data action_data[] = {
+    const std::vector<action_data> common_and_openpgp_action_data = {
         // File menu
         {
-            "file_new_certificate", i18n("New Key Pair..."), QString(),
-            "view-certificate-add", nullptr, nullptr, QStringLiteral("Ctrl+N"), false, true
+            "file_new_certificate", i18n("New OpenPGP Key Pair..."), i18n("Create a new OpenPGP certificate"),
+            "view-certificate-add", nullptr, nullptr, QStringLiteral("Ctrl+N")
         },
         {
             "file_export_certificates", i18n("Export..."), i18n("Export the selected certificate (public key) to a file"),
-            "view-certificate-export", nullptr, nullptr, QStringLiteral("Ctrl+E"), false, true
+            "view-certificate-export", nullptr, nullptr, QStringLiteral("Ctrl+E")
         },
         {
             "file_export_certificates_to_server", i18n("Publish on Server..."), i18n("Publish the selected certificate (public key) on a public keyserver"),
-            "view-certificate-export-server", nullptr, nullptr, QStringLiteral("Ctrl+Shift+E"), false, true
+            "view-certificate-export-server", nullptr, nullptr, QStringLiteral("Ctrl+Shift+E")
         },
+#ifdef MAILAKONADI_ENABLED
+        {
+            "file_export_certificate_to_provider", i18n("Publish at Mail Provider..."), i18n("Publish the selected certificate (public key) at mail provider's Web Key Directory if offered"),
+            "view-certificate-export", nullptr, nullptr, QString()
+        },
+#endif // MAILAKONADI_ENABLED
         {
             "file_export_secret_keys", i18n("Backup Secret Keys..."), QString(),
-            "view-certificate-export-secret", nullptr, nullptr, QString(), false, true
+            "view-certificate-export-secret", nullptr, nullptr, QString()
         },
         {
             "file_export_paper_key", i18n("Print Secret Key..."), QString(),
-            "document-print", nullptr, nullptr, QString(), false, true
+            "document-print", nullptr, nullptr, QString()
         },
         {
             "file_lookup_certificates", i18n("Lookup on Server..."), i18n("Search for certificates online using a public keyserver"),
-            "edit-find", nullptr, nullptr, QStringLiteral("Shift+Ctrl+I"), false, true
+            "edit-find", nullptr, nullptr, QStringLiteral("Shift+Ctrl+I")
         },
         {
             "file_import_certificates", i18n("Import..."), i18n("Import a certificate from a file"),
-            "view-certificate-import", nullptr, nullptr, QStringLiteral("Ctrl+I"), false, true
+            "view-certificate-import", nullptr, nullptr, QStringLiteral("Ctrl+I")
         },
         {
             "file_decrypt_verify_files", i18n("Decrypt/Verify..."), i18n("Decrypt and/or verify files"),
-            "document-edit-decrypt-verify", nullptr, nullptr, QString(), false, true
+            "document-edit-decrypt-verify", nullptr, nullptr, QString()
         },
         {
             "file_sign_encrypt_files", i18n("Sign/Encrypt..."), i18n("Encrypt and/or sign files"),
-            "document-edit-sign-encrypt", nullptr, nullptr, QString(), false, true
+            "document-edit-sign-encrypt", nullptr, nullptr, QString()
         },
         {
             "file_sign_encrypt_folder", i18n("Sign/Encrypt Folder..."), i18n("Encrypt and/or sign folders"),
-            nullptr/*"folder-edit-sign-encrypt"*/, nullptr, nullptr, QString(), false, true
+            nullptr/*"folder-edit-sign-encrypt"*/, nullptr, nullptr, QString()
         },
         {
             "file_checksum_create_files", i18n("Create Checksum Files..."), QString(),
-            nullptr/*"document-checksum-create"*/, nullptr, nullptr, QString(), false, true
+            nullptr/*"document-checksum-create"*/, nullptr, nullptr, QString()
         },
         {
             "file_checksum_verify_files", i18n("Verify Checksum Files..."), QString(),
-            nullptr/*"document-checksum-verify"*/, nullptr, nullptr, QString(), false, true
+            nullptr/*"document-checksum-verify"*/, nullptr, nullptr, QString()
         },
         // View menu
         {
             "view_redisplay", i18n("Redisplay"), QString(),
-            "view-refresh", nullptr, nullptr, QStringLiteral("F5"), false, true
+            "view-refresh", nullptr, nullptr, QStringLiteral("F5")
         },
         {
             "view_stop_operations", i18n("Stop Operation"), QString(),
-            "process-stop", this, SLOT(cancelCommands()), QStringLiteral("Escape"), false, false
+            "process-stop", this, [this](bool) { cancelCommands(); }, QStringLiteral("Escape"), RegularQAction, Disabled
         },
         {
             "view_certificate_details", i18n("Details"), QString(),
-            "dialog-information", nullptr, nullptr, QString(), false, true
+            "dialog-information", nullptr, nullptr, QString()
         },
         // Certificate menu
+#ifdef QGPGME_SUPPORTS_KEY_REVOCATION
+        {
+            "certificates_revoke", i18n("Revoke Certificate..."), i18n("Revoke the selected OpenPGP certificate"),
+            "view-certificate-revoke", nullptr, nullptr, {}
+        },
+#endif
         {
             "certificates_delete", i18n("Delete"), i18n("Delete selected certificates"),
-            "edit-delete", nullptr, nullptr, QStringLiteral("Delete"), false, true
+            "edit-delete", nullptr, nullptr, QStringLiteral("Delete")
         },
         {
             "certificates_certify_certificate", i18n("Certify..."), i18n("Certify the validity of the selected certificate"),
-            "view-certificate-sign", nullptr, nullptr, QString(), false, true
+            "view-certificate-sign", nullptr, nullptr, QString()
         },
         {
             "certificates_revoke_certification", i18n("Revoke Certification..."), i18n("Revoke the certification of the selected certificate"),
-            "view-certificate-revoke", nullptr, nullptr, QString(), false, true
+            "view-certificate-revoke", nullptr, nullptr, QString()
         },
         {
-            "certificates_change_expiry", i18n("Change Expiry Date..."), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
+            "certificates_change_expiry", i18n("Change End of Validity Period..."), QString(),
+            nullptr, nullptr, nullptr, QString()
         },
         {
             "certificates_change_owner_trust", i18n("Change Certification Trust..."), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
-        },
-        {
-            "certificates_trust_root", i18n("Trust Root Certificate"), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
-        },
-        {
-            "certificates_distrust_root", i18n("Distrust Root Certificate"), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
+            nullptr, nullptr, nullptr, QString()
         },
         {
             "certificates_change_passphrase", i18n("Change Passphrase..."), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
+            nullptr, nullptr, nullptr, QString()
         },
         {
-            "certificates_add_userid", i18n("Add User-ID..."), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
-        },
-        {
-            "certificates_dump_certificate", i18n("Technical Details"), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
+            "certificates_add_userid", i18n("Add User ID..."), QString(),
+            nullptr, nullptr, nullptr, QString()
         },
         // Tools menu
         {
-            "tools_refresh_x509_certificates", i18n("Refresh S/MIME Certificates"), QString(),
-            "view-refresh", nullptr, nullptr, QString(), false, true
-        },
-        {
             "tools_refresh_openpgp_certificates", i18n("Refresh OpenPGP Certificates"), QString(),
-            "view-refresh", nullptr, nullptr, QString(), false, true
-        },
-        {
-            "crl_clear_crl_cache", i18n("Clear CRL Cache"), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
-        },
-        {
-            "crl_dump_crl_cache", i18n("Dump CRL Cache"), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
-        },
-        {
-            "crl_import_crl", i18n("Import CRL From File..."), QString(),
-            nullptr, nullptr, nullptr, QString(), false, true
+            "view-refresh", nullptr, nullptr, QString()
         },
         // Window menu
         // (come from TabWidget)
         // Help menu
         // (come from MainWindow)
     };
+
+    static const action_data cms_create_csr_action_data = {
+        "file_new_certificate_signing_request", i18n("New S/MIME Certification Request..."), i18n("Create a new S/MIME certificate signing request (CSR)"),
+        "view-certificate-add", nullptr, nullptr, {},
+    };
+
+    static const std::vector<action_data> cms_action_data = {
+        // Certificate menu
+        {
+            "certificates_trust_root", i18n("Trust Root Certificate"), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+        {
+            "certificates_distrust_root", i18n("Distrust Root Certificate"), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+        {
+            "certificates_dump_certificate", i18n("Technical Details"), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+        // Tools menu
+        {
+            "tools_refresh_x509_certificates", i18n("Refresh S/MIME Certificates"), QString(),
+            "view-refresh", nullptr, nullptr, QString()
+        },
+        {
+            "crl_clear_crl_cache", i18n("Clear CRL Cache"), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+        {
+            "crl_dump_crl_cache", i18n("Dump CRL Cache"), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+        {
+            "crl_import_crl", i18n("Import CRL From File..."), QString(),
+            nullptr, nullptr, nullptr, QString()
+        },
+    };
+
+    std::vector<action_data> action_data = common_and_openpgp_action_data;
+
+    if (const Kleo::Settings settings{}; settings.cmsEnabled()) {
+        if (settings.cmsCertificateCreationAllowed()) {
+            action_data.push_back(cms_create_csr_action_data);
+        }
+        action_data.reserve(action_data.size() + cms_action_data.size());
+        std::copy(std::begin(cms_action_data), std::end(cms_action_data),
+                  std::back_inserter(action_data));
+    }
 
     make_actions_from_data(action_data, coll);
 
@@ -482,7 +526,8 @@ void KeyListController::createActions(KActionCollection *coll)
     }
 
     // ### somehow make this better...
-    registerActionForCommand<NewCertificateCommand>(coll->action(QStringLiteral("file_new_certificate")));
+    registerActionForCommand<NewOpenPGPCertificateCommand>(coll->action(QStringLiteral("file_new_certificate")));
+    registerActionForCommand<NewCertificateSigningRequestCommand>(coll->action(QStringLiteral("file_new_certificate_signing_request")));
     //---
     registerActionForCommand<LookupCertificatesCommand>(coll->action(QStringLiteral("file_lookup_certificates")));
     registerActionForCommand<ImportCertificateFromFileCommand>(coll->action(QStringLiteral("file_import_certificates")));
@@ -491,6 +536,9 @@ void KeyListController::createActions(KActionCollection *coll)
     registerActionForCommand<ExportSecretKeyCommand>(coll->action(QStringLiteral("file_export_secret_keys")));
     registerActionForCommand<ExportPaperKeyCommand>(coll->action(QStringLiteral("file_export_paper_key")));
     registerActionForCommand<ExportOpenPGPCertsToServerCommand>(coll->action(QStringLiteral("file_export_certificates_to_server")));
+#ifdef MAILAKONADI_ENABLED
+    registerActionForCommand<ExportOpenPGPCertToProviderCommand>(coll->action(QStringLiteral("file_export_certificate_to_provider")));
+#endif // MAILAKONADI_ENABLED
     //---
     registerActionForCommand<DecryptVerifyFilesCommand>(coll->action(QStringLiteral("file_decrypt_verify_files")));
     registerActionForCommand<SignEncryptFilesCommand>(coll->action(QStringLiteral("file_sign_encrypt_files")));
@@ -516,6 +564,9 @@ void KeyListController::createActions(KActionCollection *coll)
     registerActionForCommand<ChangePassphraseCommand>(coll->action(QStringLiteral("certificates_change_passphrase")));
     registerActionForCommand<AddUserIDCommand>(coll->action(QStringLiteral("certificates_add_userid")));
     //---
+#ifdef QGPGME_SUPPORTS_KEY_REVOCATION
+    registerActionForCommand<RevokeKeyCommand>(coll->action(QStringLiteral("certificates_revoke")));
+#endif
     registerActionForCommand<DeleteCertificatesCommand>(coll->action(QStringLiteral("certificates_delete")));
     //---
     registerActionForCommand<DumpCertificateCommand>(coll->action(QStringLiteral("certificates_dump_certificate")));
@@ -541,7 +592,7 @@ void KeyListController::registerAction(QAction *action, Command::Restrictions re
     const Private::action_item ai = {
         action, restrictions, create
     };
-    connect(action, SIGNAL(triggered()), this, SLOT(slotActionTriggered()));
+    connect(action, &QAction::triggered, this, [this, action]() { d->slotActionTriggered(action); });
     d->actions.push_back(ai);
 }
 
@@ -576,18 +627,16 @@ void KeyListController::cancelCommands()
 void KeyListController::Private::connectView(QAbstractItemView *view)
 {
 
-    connect(view, SIGNAL(destroyed(QObject*)),
-            q, SLOT(slotDestroyed(QObject*)));
-    connect(view, SIGNAL(doubleClicked(QModelIndex)),
-            q, SLOT(slotDoubleClicked(QModelIndex)));
-    connect(view, SIGNAL(activated(QModelIndex)),
-            q, SLOT(slotActivated(QModelIndex)));
-    connect(view->selectionModel(), SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
-            q, SLOT(slotSelectionChanged(QItemSelection,QItemSelection)));
+    connect(view, &QObject::destroyed, q, [this](QObject *obj) { slotDestroyed(obj); });
+    connect(view, &QAbstractItemView::doubleClicked, q, [this](const QModelIndex &index) { slotDoubleClicked(index); });
+    connect(view, &QAbstractItemView::activated, q, [this](const QModelIndex &index) { slotActivated(index); });
+    connect(view->selectionModel(), &QItemSelectionModel::selectionChanged,
+            q, [this](const QItemSelection &oldSel, const QItemSelection &newSel) {
+        slotSelectionChanged(oldSel, newSel);
+    });
 
     view->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(view, SIGNAL(customContextMenuRequested(QPoint)),
-            q, SLOT(slotContextMenu(QPoint)));
+    connect(view, &QWidget::customContextMenuRequested, q, [this](const QPoint &pos) { slotContextMenu(pos); });
 }
 
 void KeyListController::Private::connectCommand(Command *cmd)
@@ -595,11 +644,11 @@ void KeyListController::Private::connectCommand(Command *cmd)
     if (!cmd) {
         return;
     }
-    connect(cmd, SIGNAL(destroyed(QObject*)), q, SLOT(slotDestroyed(QObject*)));
-    connect(cmd, SIGNAL(finished()), q, SLOT(slotCommandFinished()));
+    connect(cmd, &QObject::destroyed, q, [this](QObject *obj) { slotDestroyed(obj); });
+    connect(cmd, &Command::finished, q, [this] { slotCommandFinished(); });
     //connect( cmd, SIGNAL(canceled()), q, SLOT(slotCommandCanceled()) );
     connect(cmd, &Command::info, q, &KeyListController::message);
-    connect(cmd, SIGNAL(progress(QString,int,int)), q, SLOT(slotProgress(QString,int,int)));
+    connect(cmd, &Command::progress, q, [this](const QString &message, int current, int total) { slotProgress(message, current, total); });
 }
 
 void KeyListController::Private::slotDoubleClicked(const QModelIndex &idx)
@@ -609,13 +658,11 @@ void KeyListController::Private::slotDoubleClicked(const QModelIndex &idx)
         return;
     }
 
-    DetailsCommand *const c = new DetailsCommand(view, q);
-    if (parentWidget) {
-        c->setParentWidget(parentWidget);
+    if (const auto *const keyListModel = dynamic_cast<KeyListModelInterface *>(view->model())) {
+        DetailsCommand *const c = new DetailsCommand{keyListModel->key(idx)};
+        c->setParentWidget(parentWidget ? parentWidget : view);
+        c->start();
     }
-
-    c->setIndex(idx);
-    c->start();
 }
 
 void KeyListController::Private::slotActivated(const QModelIndex &idx)
@@ -665,7 +712,7 @@ void KeyListController::Private::slotCommandFinished()
 void KeyListController::enableDisableActions(const QItemSelectionModel *sm) const
 {
     const Command::Restrictions restrictionsMask = d->calculateRestrictionsMask(sm);
-    Q_FOREACH (const Private::action_item &ai, d->actions)
+    for (const Private::action_item &ai : std::as_const(d->actions))
         if (ai.action) {
             ai.action->setEnabled(ai.restrictions == (ai.restrictions & restrictionsMask));
         }
@@ -728,16 +775,31 @@ Command::Restrictions KeyListController::Private::calculateRestrictionsMask(cons
         result |= Command::OnlyOneKey;
     }
 
-    if (std::all_of(keys.cbegin(), keys.cend(), std::mem_fn(&Key::hasSecret))) {
+#if GPGME_VERSION_NUMBER >= 0x011102 // 1.17.2
+    // we need to check the primary subkey because Key::hasSecret() is also true if just the secret key stub of an offline key is available
+    const auto primaryKeyCanBeUsedForSecretKeyOperations = [](const auto &k) { return k.subkey(0).isSecret(); };
+#else
+    // older versions of GpgME did not always set the secret flag for card keys
+    const auto primaryKeyCanBeUsedForSecretKeyOperations = [](const auto &k) { return k.subkey(0).isSecret() || k.subkey(0).isCardKey(); };
+#endif
+    if (std::all_of(keys.cbegin(), keys.cend(), primaryKeyCanBeUsedForSecretKeyOperations)) {
         result |= Command::NeedSecretKey;
-    } else if (!std::any_of(keys.cbegin(), keys.cend(), std::mem_fn(&Key::hasSecret))) {
-        result |= Command::MustNotBeSecretKey;
+    }
+
+    if (std::all_of(std::begin(keys), std::end(keys), [](const auto &k) { return k.subkey(0).isSecret() && !k.subkey(0).isCardKey(); })) {
+        result |= Command::NeedSecretKeyData;
     }
 
     if (std::all_of(keys.cbegin(), keys.cend(), [](const Key &key) { return key.protocol() == OpenPGP; })) {
         result |= Command::MustBeOpenPGP;
     } else if (std::all_of(keys.cbegin(), keys.cend(), [](const Key &key) { return key.protocol() == CMS; })) {
         result |= Command::MustBeCMS;
+    }
+
+    if (Kleo::all_of(keys, [](const auto &key) {
+        return !key.isBad();
+    })) {
+        result |= Command::MustBeValid;
     }
 
     if (all_secret_are_not_owner_trust_ultimate(keys)) {
@@ -758,25 +820,21 @@ Command::Restrictions KeyListController::Private::calculateRestrictionsMask(cons
     return result;
 }
 
-void KeyListController::Private::slotActionTriggered()
+void KeyListController::Private::slotActionTriggered(QAction *sender)
 {
-    if (const QObject *const s = q->sender()) {
-        const auto it = std::find_if(actions.cbegin(), actions.cend(),
-                                     [this](const action_item &item) { return item.action == q->sender(); });
-        if (it != actions.end())
-            if (Command *const c = it->createCommand(this->currentView, q)) {
-                if (parentWidget) {
-                    c->setParentWidget(parentWidget);
-                }
-                c->start();
-            } else
-                qCDebug(KLEOPATRA_LOG) << "createCommand() == NULL for action(?) \""
-                                       << qPrintable(s->objectName()) << "\"";
-        else {
-            qCDebug(KLEOPATRA_LOG) << "I don't know anything about action(?) \"%s\"", qPrintable(s->objectName());
-        }
-    } else {
-        qCDebug(KLEOPATRA_LOG) << "not called through a signal/slot connection (sender() == NULL)";
+    const auto it = std::find_if(actions.cbegin(), actions.cend(),
+                                 [sender](const action_item &item) { return item.action == sender; });
+    if (it != actions.end())
+        if (Command *const c = it->createCommand(this->currentView, q)) {
+            if (parentWidget) {
+                c->setParentWidget(parentWidget);
+            }
+            c->start();
+        } else
+            qCDebug(KLEOPATRA_LOG) << "createCommand() == NULL for action(?) \""
+                                    << qPrintable(sender->objectName()) << "\"";
+    else {
+        qCDebug(KLEOPATRA_LOG) << "I don't know anything about action(?) \"%s\"", qPrintable(sender->objectName());
     }
 }
 

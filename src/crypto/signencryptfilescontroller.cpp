@@ -210,7 +210,6 @@ void SignEncryptFilesController::Private::updateWizardMode()
         wizard->setEncryptionUserMutable(false);
     } else {
         wizard->setEncryptionUserMutable(true);
-        wizard->setEncryptionPreset(false);
         wizard->setEncryptionPreset(encrOp == EncryptSelected);
     }
 
@@ -242,15 +241,16 @@ static const char *extension(bool pgp, bool sign, bool encrypt, bool ascii, bool
 
 static std::shared_ptr<ArchiveDefinition> getDefaultAd()
 {
-    std::vector<std::shared_ptr<ArchiveDefinition> > ads = ArchiveDefinition::getArchiveDefinitions();
+    const std::vector<std::shared_ptr<ArchiveDefinition>> ads = ArchiveDefinition::getArchiveDefinitions();
     Q_ASSERT(!ads.empty());
     std::shared_ptr<ArchiveDefinition> ad = ads.front();
     const FileOperationsPreferences prefs;
-    Q_FOREACH (const std::shared_ptr<ArchiveDefinition> toCheck, ads) {
-        if (toCheck->id() == prefs.archiveCommand()) {
-            ad = toCheck;
-            break;
-        }
+    const QString archiveCmd = prefs.archiveCommand();
+    auto it = std::find_if(ads.cbegin(), ads.cend(), [&archiveCmd](const std::shared_ptr<ArchiveDefinition> &toCheck) {
+        return toCheck->id() == archiveCmd;
+    });
+    if (it != ads.cend()) {
+        ad = *it;
     }
     return ad;
 }
@@ -329,6 +329,7 @@ void SignEncryptFilesController::setFiles(const QStringList &files)
         }
     }
     d->ensureWizardCreated();
+    d->wizard->setSingleFile(!archive);
     d->wizard->setOutputNames(buildOutputNames(files, archive));
 }
 
@@ -514,7 +515,7 @@ void SignEncryptFilesController::Private::slotWizardOperationPrepared()
         const bool ascii = prefs.addASCIIArmor();
 
         std::vector<Key> pgpRecipients, cmsRecipients, pgpSigners, cmsSigners;
-        Q_FOREACH (const Key &k, recipients) {
+        for (const Key &k : recipients) {
             if (k.protocol() == GpgME::OpenPGP) {
                 pgpRecipients.push_back(k);
             } else {
@@ -522,7 +523,7 @@ void SignEncryptFilesController::Private::slotWizardOperationPrepared()
             }
         }
 
-        Q_FOREACH (const Key &k, signers) {
+        for (const Key &k : signers) {
             if (k.protocol() == GpgME::OpenPGP) {
                 pgpSigners.push_back(k);
             } else {
@@ -547,7 +548,7 @@ void SignEncryptFilesController::Private::slotWizardOperationPrepared()
                     wizard->encryptSymmetric());
 
         } else {
-            Q_FOREACH (const QString &file, files) {
+            for (const QString &file : std::as_const(files)) {
                 const std::vector< std::shared_ptr<SignEncryptTask> > created =
                     createSignEncryptTasksForFileInfo(QFileInfo(file), ascii,
                             pgpRecipients,
@@ -561,7 +562,7 @@ void SignEncryptFilesController::Private::slotWizardOperationPrepared()
         }
 
         const std::shared_ptr<OverwritePolicy> overwritePolicy(new OverwritePolicy(wizard));
-        Q_FOREACH (const std::shared_ptr<SignEncryptTask> &i, tasks) {
+        for (const std::shared_ptr<SignEncryptTask> &i : tasks) {
             i->setOverwritePolicy(overwritePolicy);
         }
 

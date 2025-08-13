@@ -33,7 +33,7 @@
 
 #include <algorithm>
 #include <vector>
-
+#include <KLazyLocalizedString>
 using namespace GpgME;
 using namespace Kleo;
 using namespace Kleo::Dialogs;
@@ -48,7 +48,7 @@ class DeleteCertificatesCommand::Private : public Command::Private
     }
 public:
     explicit Private(DeleteCertificatesCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     void startDeleteJob(GpgME::Protocol protocol);
 
@@ -76,8 +76,8 @@ public:
         applyWindowID(dialog);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setWindowTitle(i18nc("@title:window", "Delete Certificates"));
-        connect(dialog, SIGNAL(accepted()), q_func(), SLOT(slotDialogAccepted()));
-        connect(dialog, SIGNAL(rejected()), q_func(), SLOT(slotDialogRejected()));
+        connect(dialog, &QDialog::accepted, q_func(), [this]() { slotDialogAccepted(); });
+        connect(dialog, &QDialog::rejected, q_func(), [this]() { slotDialogRejected(); });
     }
     void ensureDialogShown()
     {
@@ -143,105 +143,64 @@ enum Action { Nothing = 0, Failure = 1, ClearCMS = 2, ClearPGP = 4 };
 //        cms.empty() << 1U |     d->canDelete( CMS ) << 0U ;
 
 static const struct {
-    const char *text;
+    const KLazyLocalizedString text;
     Action actions;
 } deletionErrorCases[16] = {
     // if havePGP
     //   if cantPGP
     //     if haveCMS
-    {
-        I18N_NOOP("Neither the OpenPGP nor the CMS "
-        "backends support certificate deletion.\n"
-        "Check your installation."),
-        Failure
-    }, // cantCMS
-    {
-        I18N_NOOP("The OpenPGP backend does not support "
-        "certificate deletion.\n"
-        "Check your installation.\n"
-        "Only the selected CMS certificates "
-        "will be deleted."),
-        ClearPGP
-    }, // canCMS
+    {kli18n("Neither the OpenPGP nor the CMS "
+            "backends support certificate deletion.\n"
+            "Check your installation."),
+     Failure}, // cantCMS
+    {kli18n("The OpenPGP backend does not support "
+            "certificate deletion.\n"
+            "Check your installation.\n"
+            "Only the selected CMS certificates "
+            "will be deleted."),
+     ClearPGP}, // canCMS
     //     if !haveCMS
-    {
-        I18N_NOOP("The OpenPGP backend does not support "
-        "certificate deletion.\n"
-        "Check your installation."),
-        Failure
-    },
-    {
-        I18N_NOOP("The OpenPGP backend does not support "
-        "certificate deletion.\n"
-        "Check your installation."),
-        Failure
-    },
+    {kli18n("The OpenPGP backend does not support "
+            "certificate deletion.\n"
+            "Check your installation."),
+     Failure},
+    {kli18n("The OpenPGP backend does not support "
+            "certificate deletion.\n"
+            "Check your installation."),
+     Failure},
     //   if canPGP
     //      if haveCMS
-    {
-        I18N_NOOP("The CMS backend does not support "
-        "certificate deletion.\n"
-        "Check your installation.\n"
-        "Only the selected OpenPGP certificates "
-        "will be deleted."),
-        ClearCMS
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {kli18n("The CMS backend does not support "
+            "certificate deletion.\n"
+            "Check your installation.\n"
+            "Only the selected OpenPGP certificates "
+            "will be deleted."),
+     ClearCMS},                        // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
     //      if !haveCMS
-    {
-        nullptr,
-        Nothing
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {KLazyLocalizedString(), Nothing}, // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
     // if !havePGP
     //   if cantPGP
     //     if haveCMS
-    {
-        I18N_NOOP("The CMS backend does not support "
-        "certificate deletion.\n"
-        "Check your installation."),
-        Failure
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {kli18n("The CMS backend does not support "
+            "certificate deletion.\n"
+            "Check your installation."),
+     Failure},                         // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
     //     if !haveCMS
-    {
-        nullptr,
-        Nothing
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {KLazyLocalizedString(), Nothing}, // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
     //  if canPGP
     //     if haveCMS
-    {
-        I18N_NOOP("The CMS backend does not support "
-        "certificate deletion.\n"
-        "Check your installation."),
-        Failure
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {kli18n("The CMS backend does not support "
+            "certificate deletion.\n"
+            "Check your installation."),
+     Failure},                         // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
     //     if !haveCMS
-    {
-        nullptr,
-        Nothing
-    }, // cantCMS
-    {
-        nullptr,
-        Nothing
-    }, // canCMS
+    {KLazyLocalizedString(), Nothing}, // cantCMS
+    {KLazyLocalizedString(), Nothing}, // canCMS
 };
 } // anon namespace
 
@@ -299,10 +258,11 @@ void DeleteCertificatesCommand::Private::slotDialogAccepted()
         cms.empty() << 1U |     canDelete(CMS) << 0U;
 
     if (const unsigned int actions = deletionErrorCases[errorCase].actions) {
-        information(i18n(deletionErrorCases[errorCase].text),
+        information(KLocalizedString(deletionErrorCases[errorCase].text).toString(),
                     (actions & Failure)
-                    ? i18n("Certificate Deletion Failed")
-                    : i18n("Certificate Deletion Problem"));
+                        ? i18n("Certificate Deletion Failed")
+                        : i18n("Certificate Deletion Problem"));
+
         if (actions & ClearCMS) {
             cms.clear();
         }
@@ -344,12 +304,13 @@ void DeleteCertificatesCommand::Private::startDeleteJob(GpgME::Protocol protocol
 
     std::unique_ptr<MultiDeleteJob> job(new MultiDeleteJob(backend));
 
-    if (protocol == CMS)
-        connect(job.get(), SIGNAL(result(GpgME::Error,GpgME::Key)),
-                q_func(), SLOT(cmsDeleteResult(GpgME::Error)));
-    else
-        connect(job.get(), SIGNAL(result(GpgME::Error,GpgME::Key)),
-                q_func(), SLOT(pgpDeleteResult(GpgME::Error)));
+    connect(job.get(), &QGpgME::MultiDeleteJob::result, q_func(), [this, protocol](const GpgME::Error &result) {
+        if (protocol == CMS) {
+            cmsDeleteResult(result);
+        } else {
+            pgpDeleteResult(result);
+        }
+    });
 
     connect(job.get(), &Job::progress,
             q, &Command::progress);

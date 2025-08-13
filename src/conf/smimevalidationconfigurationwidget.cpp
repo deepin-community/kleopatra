@@ -13,12 +13,13 @@
 
 #include "ui_smimevalidationconfigurationwidget.h"
 
+#include "labelledwidget.h"
+
 #include "smimevalidationpreferences.h"
 
 #include <Libkleo/Compat>
 
 #include <QGpgME/CryptoConfig>
-#include <QGpgME/Protocol>
 
 #include <KLocalizedString>
 #include "kleopatra_debug.h"
@@ -38,15 +39,46 @@ class SMimeValidationConfigurationWidget::Private
 public:
     explicit Private(SMimeValidationConfigurationWidget *qq)
         : q(qq),
-          customHTTPProxyWritable(false),
-          ui(q)
+          ui(qq)
     {
 #if HAVE_QDBUS
         QDBusConnection::sessionBus().connect(QString(), QString(), QStringLiteral("org.kde.kleo.CryptoConfig"), QStringLiteral("changed"), q, SLOT(load()));
 #endif
+        auto changedSignal = &SMimeValidationConfigurationWidget::changed;
+        connect(ui.intervalRefreshCB, &QCheckBox::toggled, q, changedSignal);
+#if QT_DEPRECATED_SINCE(5, 14)
+        connect(ui.intervalRefreshSB, qOverload<int>(&QSpinBox::valueChanged), q, changedSignal);
+#else
+        connect(ui.intervalRefreshSB, &QSpinBox::valueChanged, q, changedSignal);
+#endif
+        connect(ui.OCSPCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.OCSPResponderURL, &QLineEdit::textChanged, q, changedSignal);
+
+        auto certRequesterSignal = &KleopatraClientCopy::Gui::CertificateRequester::selectedCertificatesChanged;
+        connect(ui.OCSPResponderSignature, certRequesterSignal, q, changedSignal);
+
+        connect(ui.doNotCheckCertPolicyCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.neverConsultCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.allowMarkTrustedCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.fetchMissingCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.ignoreServiceURLCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.ignoreHTTPDPCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.disableHTTPCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.honorHTTPProxyRB, &QRadioButton::toggled, q, changedSignal);
+        connect(ui.useCustomHTTPProxyRB, &QRadioButton::toggled, q, changedSignal);
+        connect(ui.customHTTPProxy, &QLineEdit::textChanged, q, changedSignal);
+        connect(ui.ignoreLDAPDPCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.disableLDAPCB, &QCheckBox::toggled, q, changedSignal);
+        connect(ui.customLDAPProxy, &QLineEdit::textChanged, q, changedSignal);
+
+        auto enableDisableSlot = [this]() {
+            enableDisableActions();
+        };
+        connect(ui.useCustomHTTPProxyRB, &QRadioButton::toggled, q, enableDisableSlot);
+        connect(ui.disableHTTPCB, &QCheckBox::toggled, q, enableDisableSlot);
     }
 
-    bool customHTTPProxyWritable;
+    bool customHTTPProxyWritable = false;
 
 private:
     void enableDisableActions()
@@ -58,45 +90,20 @@ private:
 
 private:
     struct UI : Ui_SMimeValidationConfigurationWidget {
+        LabelledWidget<KleopatraClientCopy::Gui::CertificateRequester> labelledOCSPResponderSignature;
+        LabelledWidget<QLineEdit> labelledOCSPResponderURL;
+
         explicit UI(SMimeValidationConfigurationWidget *q)
             : Ui_SMimeValidationConfigurationWidget()
         {
             setupUi(q);
 
+            labelledOCSPResponderURL.setWidgets(OCSPResponderURL, OCSPResponderURLLabel);
+            labelledOCSPResponderSignature.setWidgets(OCSPResponderSignature, OCSPResponderSignatureLabel);
+
             if (QLayout *l = q->layout()) {
                 l->setContentsMargins(0, 0, 0, 0);
             }
-
-            const struct {
-                QObject *object;
-                const char *signal;
-            } sources[] = {
-                { intervalRefreshCB, SIGNAL(toggled(bool)) },
-                { intervalRefreshSB, SIGNAL(valueChanged(int)) },
-                { OCSPCB, SIGNAL(toggled(bool)) },
-                { OCSPResponderURL, SIGNAL(textChanged(QString)) },
-                { OCSPResponderSignature, SIGNAL(selectedCertificatesChanged(QStringList)) },
-                { doNotCheckCertPolicyCB, SIGNAL(toggled(bool)) },
-                { neverConsultCB, SIGNAL(toggled(bool)) },
-                { allowMarkTrustedCB, SIGNAL(toggled(bool)) },
-                { fetchMissingCB, SIGNAL(toggled(bool)) },
-                { ignoreServiceURLCB, SIGNAL(toggled(bool)) },
-                { ignoreHTTPDPCB, SIGNAL(toggled(bool)) },
-                { disableHTTPCB, SIGNAL(toggled(bool)) },
-                { honorHTTPProxyRB, SIGNAL(toggled(bool)) },
-                { useCustomHTTPProxyRB, SIGNAL(toggled(bool)) },
-                { customHTTPProxy, SIGNAL(textChanged(QString)) },
-                { ignoreLDAPDPCB, SIGNAL(toggled(bool)) },
-                { disableLDAPCB, SIGNAL(toggled(bool)) },
-                { customLDAPProxy, SIGNAL(textChanged(QString)) },
-            };
-            for (unsigned int i = 0; i < sizeof sources / sizeof * sources; ++i) {
-                connect(sources[i].object, sources[i].signal, q, SIGNAL(changed()));
-            }
-            connect(useCustomHTTPProxyRB, SIGNAL(toggled(bool)),
-                    q, SLOT(enableDisableActions()));
-            connect(disableHTTPCB, SIGNAL(toggled(bool)),
-                    q, SLOT(enableDisableActions()));
 
             OCSPResponderSignature->setOnlyX509CertificatesAllowed(true);
             OCSPResponderSignature->setOnlySigningCertificatesAllowed(true);
@@ -203,6 +210,9 @@ void SMimeValidationConfigurationWidget::load()
     const unsigned int refreshInterval = preferences.refreshInterval();
     d->ui.intervalRefreshCB->setChecked(refreshInterval > 0);
     d->ui.intervalRefreshSB->setValue(refreshInterval);
+    const bool isRefreshIntervalImmutable = preferences.isImmutable(QStringLiteral("RefreshInterval"));
+    d->ui.intervalRefreshCB->setEnabled(!isRefreshIntervalImmutable);
+    d->ui.intervalRefreshSB->setEnabled(!isRefreshIntervalImmutable);
 
     CryptoConfig *const config = QGpgME::cryptoConfig();
     if (!config) {
@@ -230,30 +240,37 @@ void SMimeValidationConfigurationWidget::load()
     if (e.mCheckUsingOCSPConfigEntry) {
         d->ui.OCSPCB->setChecked(e.mCheckUsingOCSPConfigEntry->boolValue());
     }
+    d->ui.OCSPCB->setEnabled(e.mCheckUsingOCSPConfigEntry && !e.mCheckUsingOCSPConfigEntry->isReadOnly());
     d->ui.OCSPGroupBox->setEnabled(d->ui.OCSPCB->isChecked());
 
     if (e.mDoNotCheckCertPolicyConfigEntry) {
         d->ui.doNotCheckCertPolicyCB->setChecked(e.mDoNotCheckCertPolicyConfigEntry->boolValue());
     }
+    d->ui.doNotCheckCertPolicyCB->setEnabled(e.mDoNotCheckCertPolicyConfigEntry && !e.mDoNotCheckCertPolicyConfigEntry->isReadOnly());
     if (e.mNeverConsultConfigEntry) {
         d->ui.neverConsultCB->setChecked(e.mNeverConsultConfigEntry->boolValue());
     }
+    d->ui.neverConsultCB->setEnabled(e.mNeverConsultConfigEntry && !e.mNeverConsultConfigEntry->isReadOnly());
     if (e.mNoAllowMarkTrustedConfigEntry) {
         d->ui.allowMarkTrustedCB->hide();    // this option was only here to _enable_ allow-mark-trusted, and makes no sense if it's already default on
     }
     if (e.mAllowMarkTrustedConfigEntry) {
         d->ui.allowMarkTrustedCB->setChecked(e.mAllowMarkTrustedConfigEntry->boolValue());
     }
+    d->ui.allowMarkTrustedCB->setEnabled(e.mAllowMarkTrustedConfigEntry && !e.mAllowMarkTrustedConfigEntry->isReadOnly());
     if (e.mFetchMissingConfigEntry) {
         d->ui.fetchMissingCB->setChecked(e.mFetchMissingConfigEntry->boolValue());
     }
+    d->ui.fetchMissingCB->setEnabled(e.mFetchMissingConfigEntry && !e.mFetchMissingConfigEntry->isReadOnly());
 
     if (e.mOCSPResponderURLConfigEntry) {
         d->ui.OCSPResponderURL->setText(e.mOCSPResponderURLConfigEntry->stringValue());
     }
+    d->ui.labelledOCSPResponderURL.setEnabled(e.mOCSPResponderURLConfigEntry && !e.mOCSPResponderURLConfigEntry->isReadOnly());
     if (e.mOCSPResponderSignature) {
         d->ui.OCSPResponderSignature->setSelectedCertificate(e.mOCSPResponderSignature->stringValue());
     }
+    d->ui.labelledOCSPResponderSignature.setEnabled(e.mOCSPResponderSignature && !e.mOCSPResponderSignature->isReadOnly());
 
     // dirmngr-0.9.0 options
     initializeDirmngrCheckbox(d->ui.ignoreServiceURLCB, e.mIgnoreServiceURLEntry);

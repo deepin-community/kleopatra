@@ -38,7 +38,6 @@
 
 using namespace Kleo;
 using namespace Kleo::Commands;
-using namespace Kleo::Dialogs;
 using namespace Kleo::SmartCard;
 using namespace GpgME;
 using namespace QGpgME;
@@ -52,7 +51,7 @@ class CreateOpenPGPKeyFromCardKeysCommand::Private : public CardCommand::Private
     }
 public:
     explicit Private(CreateOpenPGPKeyFromCardKeysCommand *qq, const std::string &serialNumber, const std::string &appName, QWidget *parent);
-    ~Private();
+    ~Private() override;
 
 private:
     void start();
@@ -149,10 +148,9 @@ void CreateOpenPGPKeyFromCardKeysCommand::Private::slotDialogAccepted()
         return;
     }
 
-    connect(job, SIGNAL(result(GpgME::Error)),
-            q, SLOT(slotResult(GpgME::Error)));
+    connect(job, &QGpgME::QuickJob::result, q, [this](const GpgME::Error &error) { slotResult(error); });
 
-    const QString userID = Formatting::prettyNameAndEMail(OpenPGP, QString(), dialog->name(), dialog->email(), dialog->comment());
+    const QString userID = Formatting::prettyNameAndEMail(OpenPGP, QString(), dialog->name(), dialog->email());
     const QDateTime expires = QDateTime();
     const unsigned int flags = GPGME_CREATE_FORCE;
     job->startCreate(userID, "card", expires, Key(), flags);
@@ -168,11 +166,9 @@ void CreateOpenPGPKeyFromCardKeysCommand::Private::slotResult(const Error &err)
     if (err.isCanceled()) {
         // do nothing
     } else if (err) {
-        error(i18nc("@info", "Creating an OpenPGP key from the card keys failed: %1", QString::fromUtf8(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Creating an OpenPGP key from the card keys failed: %1", QString::fromUtf8(err.asString())));
     } else {
-        information(i18nc("@info", "Successfully generated an OpenPGP key from the card keys."),
-                    i18nc("@title", "Success"));
+        success(i18nc("@info", "Successfully generated an OpenPGP key from the card keys."));
     }
 
     finished();
@@ -188,8 +184,8 @@ void CreateOpenPGPKeyFromCardKeysCommand::Private::ensureDialogCreated()
     applyWindowID(dialog);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 CreateOpenPGPKeyFromCardKeysCommand::CreateOpenPGPKeyFromCardKeysCommand(const std::string &serialNumber, const std::string &appName, QWidget *parent)
@@ -204,7 +200,7 @@ CreateOpenPGPKeyFromCardKeysCommand::~CreateOpenPGPKeyFromCardKeysCommand()
 // static
 bool CreateOpenPGPKeyFromCardKeysCommand::isSupported()
 {
-    return !(engineInfo(GpgEngine).engineVersion() < "2.2.18");
+    return !(engineInfo(GpgEngine).engineVersion() < "2.3.0");
 }
 
 void CreateOpenPGPKeyFromCardKeysCommand::doStart()

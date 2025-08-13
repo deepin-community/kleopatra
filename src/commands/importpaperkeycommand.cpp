@@ -150,7 +150,7 @@ void ImportPaperKeyCommand::postSuccessHook(QWidget *)
 void ImportPaperKeyCommand::doStart()
 {
     if (paperKeyInstallPath().isNull()) {
-        KMessageBox::sorry(d->parentWidgetOrView(),
+        KMessageBox::error(d->parentWidgetOrView(),
                            xi18nc("@info", "<para><application>Kleopatra</application> uses "
                                            "<application>PaperKey</application> to import your "
                                            "text backup.</para>"
@@ -187,10 +187,7 @@ void ImportPaperKeyCommand::doStart()
     }
 
     auto exportJob = QGpgME::openpgp()->publicKeyExportJob();
-    // Do not change to new style connect without testing on
-    // Windows / mingw first for compatibility please.
-    connect(exportJob, &QGpgME::ExportJob::result,
-            this, &ImportPaperKeyCommand::exportResult);
+    connect(exportJob, &QGpgME::ExportJob::result, this, &ImportPaperKeyCommand::exportResult);
     exportJob->start(QStringList() << QLatin1String(d->key().primaryFingerprint()));
 }
 

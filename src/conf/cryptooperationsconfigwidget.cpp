@@ -3,8 +3,12 @@
 
     This file is part of kleopatra, the KDE key manager
     SPDX-FileCopyrightText: 2010 Klarälvdalens Datakonsult AB
-    2016 by Bundesamt für Sicherheit in der Informationstechnik
+
+    SPDX-FileCopyrightText: 2016 Bundesamt für Sicherheit in der Informationstechnik
     SPDX-FileContributor: Intevation GmbH
+
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -16,6 +20,7 @@
 
 #include "emailoperationspreferences.h"
 #include "fileoperationspreferences.h"
+#include "settings.h"
 
 #include <Libkleo/ChecksumDefinition>
 #include <Libkleo/KeyFilterManager>
@@ -43,14 +48,14 @@
 #include <QLabel>
 #include <QRegularExpression>
 
+#include <kwidgetsaddons_version.h>
 #include <memory>
 
 using namespace Kleo;
 using namespace Kleo::Config;
 
 CryptoOperationsConfigWidget::CryptoOperationsConfigWidget(QWidget *p, Qt::WindowFlags f)
-    : QWidget(p, f),
-      mApplyBtn(nullptr)
+    : QWidget{p, f}
 {
     setupGui();
 }
@@ -101,12 +106,22 @@ void CryptoOperationsConfigWidget::applyProfile(const QString &profile)
     qCDebug(KLEOPATRA_LOG) << "Applying profile " << profile;
 
     if (profile == i18n("default")) {
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+        if (KMessageBox::warningTwoActions(
+#else
         if (KMessageBox::warningYesNo(
-                          this,
-                          i18n("This means that every configuration option of the GnuPG System will be reset to its default."),
-                          i18n("Apply profile"),
-                          KStandardGuiItem::apply(),
-                          KStandardGuiItem::no()) != KMessageBox::Yes) {
+
+#endif
+                this,
+                i18n("This means that every configuration option of the GnuPG System will be reset to its default."),
+                i18n("Apply profile"),
+                KStandardGuiItem::apply(),
+                KStandardGuiItem::cancel())
+        #if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+            != KMessageBox::ButtonCode::PrimaryAction) {
+#else
+                != KMessageBox::Yes) {
+        #endif
             return;
         }
         resetDefaults();
@@ -116,7 +131,7 @@ void CryptoOperationsConfigWidget::applyProfile(const QString &profile)
 
     mApplyBtn->setEnabled(false);
 
-    QDir datadir(QString::fromLocal8Bit(GpgME::dirInfo("datadir")) + QStringLiteral("/../doc/gnupg/examples"));
+    QDir datadir(QString::fromUtf8(GpgME::dirInfo("datadir")) + QStringLiteral("/../doc/gnupg/examples"));
     const auto path = datadir.filePath(profile + QStringLiteral(".prf"));
 
     auto gpgconf = new QProcess;
@@ -130,11 +145,15 @@ void CryptoOperationsConfigWidget::applyProfile(const QString &profile)
 
     qDebug() << "Starting" << ei.fileName() << "with args" << gpgconf->arguments();
 
-    connect(gpgconf, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+#if QT_DEPRECATED_SINCE(5, 13)
+    connect(gpgconf, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+#else
+    connect(gpgconf, &QProcess::finished,
+#endif
             this, [this, gpgconf, profile] () {
         mApplyBtn->setEnabled(true);
         if (gpgconf->exitStatus() != QProcess::NormalExit) {
-            KMessageBox::error(this, QStringLiteral("<pre>%1</pre>").arg(QString::fromLocal8Bit(gpgconf->readAll())));
+            KMessageBox::error(this, QStringLiteral("<pre>%1</pre>").arg(QString::fromUtf8(gpgconf->readAll())));
             delete gpgconf;
             return;
         }
@@ -156,13 +175,13 @@ void CryptoOperationsConfigWidget::applyProfile(const QString &profile)
 // group if there are any.
 void CryptoOperationsConfigWidget::setupProfileGui(QBoxLayout *layout)
 {
-    qCDebug(KLEOPATRA_LOG) << "Engine version ";
-    if (GpgME::engineInfo(GpgME::GpgEngine).engineVersion() < "2.1.20" || !layout) {
+    const Settings settings;
+    if (settings.profilesDisabled() || GpgME::engineInfo(GpgME::GpgEngine).engineVersion() < "2.1.20" || !layout) {
         //  Profile support is new in 2.1.20
-        qCDebug(KLEOPATRA_LOG) << "Engine version false";
+        qCDebug(KLEOPATRA_LOG) << "Profile settings disabled";
         return;
     }
-    QDir datadir(QString::fromLocal8Bit(GpgME::dirInfo("datadir")) + QStringLiteral("/../doc/gnupg/examples"));
+    QDir datadir(QString::fromUtf8(GpgME::dirInfo("datadir")) + QStringLiteral("/../doc/gnupg/examples"));
 
     if (!datadir.exists()) {
         qCDebug(KLEOPATRA_LOG) << "Failed to find gnupg's example profile directory" << datadir.path();
@@ -211,7 +230,7 @@ void CryptoOperationsConfigWidget::setupProfileGui(QBoxLayout *layout)
         applyProfile(combo->currentText());
     });
 
-    connect(combo, QOverload<const QString &>::of(&QComboBox::currentTextChanged), this, [this] (const QString &text) {
+    connect(combo, &QComboBox::currentTextChanged, this, [this] (const QString &text) {
         mApplyBtn->setEnabled(!text.isEmpty());
     });
 }
@@ -238,26 +257,32 @@ void CryptoOperationsConfigWidget::setupGui()
                                              "So that they can be opened with an editor or sent in a mail body. "
                                              "This will increase file size by one third."));
     mAutoDecryptVerifyCB = new QCheckBox(i18n("Automatically start operation based on input detection for decrypt/verify."));
+    mAutoExtractArchivesCB = new QCheckBox(i18n("Automatically extract file archives after decryption"));
     mTmpDirCB = new QCheckBox(i18n("Create temporary decrypted files in the folder of the encrypted file."));
     mTmpDirCB->setToolTip(i18nc("@info", "Set this option to avoid using the users temporary directory."));
+    mSymmetricOnlyCB = new QCheckBox(i18n("Use symmetric encryption only."));
+    mSymmetricOnlyCB->setToolTip(i18nc("@info", "Set this option to disable public key encryption."));
 
     fileGrpLay->addWidget(mPGPFileExtCB);
     fileGrpLay->addWidget(mAutoDecryptVerifyCB);
+    fileGrpLay->addWidget(mAutoExtractArchivesCB);
     fileGrpLay->addWidget(mASCIIArmorCB);
     fileGrpLay->addWidget(mTmpDirCB);
+    fileGrpLay->addWidget(mSymmetricOnlyCB);
 
     auto comboLay = new QGridLayout;
-    auto chkLabel = new QLabel(i18n("Checksum program to use when creating checksum files:"));
-    comboLay->addWidget(chkLabel, 0, 0);
-    mChecksumDefinitionCB = new QComboBox;
-    comboLay->addWidget(mChecksumDefinitionCB, 0, 1);
 
-    auto archLabel = new QLabel(i18n("Archive command to use when archiving files:"));
-    comboLay->addWidget(archLabel, 1, 0);
-    mArchiveDefinitionCB = new QComboBox;
-    comboLay->addWidget(mArchiveDefinitionCB, 1, 1);
+    mChecksumDefinitionCB.createWidgets(this);
+    mChecksumDefinitionCB.label()->setText(i18n("Checksum program to use when creating checksum files:"));
+    comboLay->addWidget(mChecksumDefinitionCB.label(), 0, 0);
+    comboLay->addWidget(mChecksumDefinitionCB.widget(), 0, 1);
+
+    mArchiveDefinitionCB.createWidgets(this);
+    mArchiveDefinitionCB.label()->setText(i18n("Archive command to use when archiving files:"));
+    comboLay->addWidget(mArchiveDefinitionCB.label(), 1, 0);
+    comboLay->addWidget(mArchiveDefinitionCB.widget(), 1, 1);
+
     fileGrpLay->addLayout(comboLay);
-
 
     fileGrp->setLayout(fileGrpLay);
     baseLay->addWidget(fileGrp);
@@ -266,23 +291,12 @@ void CryptoOperationsConfigWidget::setupGui()
 
     baseLay->addStretch(1);
 
-
-    if (!GpgME::hasFeature(0, GpgME::BinaryAndFineGrainedIdentify)) {
-        /* Auto handling requires a working identify in GpgME.
-         * so that classify in kleoaptra can correctly detect the input.*/
-        mAutoDecryptVerifyCB->setVisible(false);
+    for (auto cb : findChildren<QCheckBox *>()) {
+        connect(cb, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
     }
-
-    connect(mQuickSignCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
-    connect(mQuickEncryptCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
-    connect(mChecksumDefinitionCB, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-            this, &CryptoOperationsConfigWidget::changed);
-    connect(mArchiveDefinitionCB, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-            this, &CryptoOperationsConfigWidget::changed);
-    connect(mPGPFileExtCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
-    connect(mAutoDecryptVerifyCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
-    connect(mASCIIArmorCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
-    connect(mTmpDirCB, &QCheckBox::toggled, this, &CryptoOperationsConfigWidget::changed);
+    for (auto combo : findChildren<QComboBox *>()) {
+        connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, &CryptoOperationsConfigWidget::changed);
+    }
 }
 
 CryptoOperationsConfigWidget::~CryptoOperationsConfigWidget() {}
@@ -290,70 +304,93 @@ CryptoOperationsConfigWidget::~CryptoOperationsConfigWidget() {}
 void CryptoOperationsConfigWidget::defaults()
 {
     EMailOperationsPreferences emailPrefs;
-    emailPrefs.setDefaults();
-    mQuickSignCB->setChecked(emailPrefs.quickSignEMail());
-    mQuickEncryptCB->setChecked(emailPrefs.quickEncryptEMail());
+    emailPrefs.setQuickSignEMail(emailPrefs.findItem(QStringLiteral("QuickSignEMail"))->getDefault().toBool());
+    emailPrefs.setQuickEncryptEMail(emailPrefs.findItem(QStringLiteral("QuickEncryptEMail"))->getDefault().toBool());
 
     FileOperationsPreferences filePrefs;
-    filePrefs.setDefaults();
-    mPGPFileExtCB->setChecked(filePrefs.usePGPFileExt());
-    mAutoDecryptVerifyCB->setChecked(filePrefs.autoDecryptVerify());
+    filePrefs.setUsePGPFileExt(filePrefs.findItem(QStringLiteral("UsePGPFileExt"))->getDefault().toBool());
+    filePrefs.setAutoDecryptVerify(filePrefs.findItem(QStringLiteral("AutoDecryptVerify"))->getDefault().toBool());
+    filePrefs.setAutoExtractArchives(filePrefs.findItem(QStringLiteral("AutoExtractArchives"))->getDefault().toBool());
+    filePrefs.setAddASCIIArmor(filePrefs.findItem(QStringLiteral("AddASCIIArmor"))->getDefault().toBool());
+    filePrefs.setDontUseTmpDir(filePrefs.findItem(QStringLiteral("DontUseTmpDir"))->getDefault().toBool());
+    filePrefs.setSymmetricEncryptionOnly(filePrefs.findItem(QStringLiteral("SymmetricEncryptionOnly"))->getDefault().toBool());
+    filePrefs.setArchiveCommand(filePrefs.findItem(QStringLiteral("ArchiveCommand"))->getDefault().toString());
 
-    if (mChecksumDefinitionCB->count()) {
-        mChecksumDefinitionCB->setCurrentIndex(0);
-    }
+    Settings settings;
+    settings.setChecksumDefinitionId(settings.findItem(QStringLiteral("ChecksumDefinitionId"))->getDefault().toString());
 
-    if (mArchiveDefinitionCB->count()) {
-        mArchiveDefinitionCB->setCurrentIndex(0);
-    }
+    load(emailPrefs, filePrefs, settings);
 }
 
-Q_DECLARE_METATYPE(std::shared_ptr<Kleo::ChecksumDefinition>)
+void CryptoOperationsConfigWidget::load(const Kleo::EMailOperationsPreferences &emailPrefs,
+                                        const Kleo::FileOperationsPreferences &filePrefs,
+                                        const Kleo::Settings &settings)
+{
+    mQuickSignCB->setChecked(emailPrefs.quickSignEMail());
+    mQuickSignCB->setEnabled(!emailPrefs.isImmutable(QStringLiteral("QuickSignEMail")));
+    mQuickEncryptCB->setChecked(emailPrefs.quickEncryptEMail());
+    mQuickEncryptCB->setEnabled(!emailPrefs.isImmutable(QStringLiteral("QuickEncryptEMail")));
+
+    mPGPFileExtCB->setChecked(filePrefs.usePGPFileExt());
+    mPGPFileExtCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("UsePGPFileExt")));
+    mAutoDecryptVerifyCB->setChecked(filePrefs.autoDecryptVerify());
+    mAutoDecryptVerifyCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("AutoDecryptVerify")));
+    mAutoExtractArchivesCB->setChecked(filePrefs.autoExtractArchives());
+    mAutoExtractArchivesCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("AutoExtractArchives")));
+    mASCIIArmorCB->setChecked(filePrefs.addASCIIArmor());
+    mASCIIArmorCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("AddASCIIArmor")));
+    mTmpDirCB->setChecked(filePrefs.dontUseTmpDir());
+    mTmpDirCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("DontUseTmpDir")));
+    mSymmetricOnlyCB->setChecked(filePrefs.symmetricEncryptionOnly());
+    mSymmetricOnlyCB->setEnabled(!filePrefs.isImmutable(QStringLiteral("SymmetricEncryptionOnly")));
+
+    const auto defaultChecksumDefinitionId = settings.checksumDefinitionId();
+    {
+        const auto index = mChecksumDefinitionCB.widget()->findData(defaultChecksumDefinitionId);
+        if (index >= 0) {
+            mChecksumDefinitionCB.widget()->setCurrentIndex(index);
+        } else {
+            qCWarning(KLEOPATRA_LOG) << "No checksum definition found with id" << defaultChecksumDefinitionId;
+        }
+    }
+    mChecksumDefinitionCB.setEnabled(!settings.isImmutable(QStringLiteral("ChecksumDefinitionId")));
+
+    const auto ad_default_id = filePrefs.archiveCommand();
+    {
+        const auto index = mArchiveDefinitionCB.widget()->findData(ad_default_id);
+        if (index >= 0) {
+            mArchiveDefinitionCB.widget()->setCurrentIndex(index);
+        } else {
+            qCWarning(KLEOPATRA_LOG) << "No archive definition found with id" << ad_default_id;
+        }
+    }
+    mArchiveDefinitionCB.setEnabled(!filePrefs.isImmutable(QStringLiteral("ArchiveCommand")));
+}
+
 
 void CryptoOperationsConfigWidget::load()
 {
-
-    const EMailOperationsPreferences emailPrefs;
-    mQuickSignCB   ->setChecked(emailPrefs.quickSignEMail());
-    mQuickEncryptCB->setChecked(emailPrefs.quickEncryptEMail());
-
-    const FileOperationsPreferences filePrefs;
-    mPGPFileExtCB->setChecked(filePrefs.usePGPFileExt());
-    mAutoDecryptVerifyCB->setChecked(filePrefs.autoDecryptVerify());
-    mASCIIArmorCB->setChecked(filePrefs.addASCIIArmor());
-    mTmpDirCB->setChecked(filePrefs.dontUseTmpDir());
-
-    const std::vector< std::shared_ptr<ChecksumDefinition> > cds = ChecksumDefinition::getChecksumDefinitions();
-    const std::shared_ptr<ChecksumDefinition> default_cd = ChecksumDefinition::getDefaultChecksumDefinition(cds);
-
-    mChecksumDefinitionCB->clear();
-    mArchiveDefinitionCB->clear();
-
+    mChecksumDefinitionCB.widget()->clear();
+    const auto cds = ChecksumDefinition::getChecksumDefinitions();
     for (const std::shared_ptr<ChecksumDefinition> &cd : cds) {
-        mChecksumDefinitionCB->addItem(cd->label(), QVariant::fromValue(cd));
-        if (cd == default_cd) {
-            mChecksumDefinitionCB->setCurrentIndex(mChecksumDefinitionCB->count() - 1);
-        }
+        mChecksumDefinitionCB.widget()->addItem(cd->label(), QVariant{cd->id()});
     }
-
-    const QString ad_default_id = filePrefs.archiveCommand();
 
     // This is a weird hack but because we are a KCM we can't link
     // against ArchiveDefinition which pulls in loads of other classes.
     // So we do the parsing which archive definitions exist here ourself.
+    mArchiveDefinitionCB.widget()->clear();
     if (KSharedConfigPtr config = KSharedConfig::openConfig(QStringLiteral("libkleopatrarc"))) {
         const QStringList groups = config->groupList().filter(QRegularExpression(QStringLiteral("^Archive Definition #")));
         for (const QString &group : groups) {
             const KConfigGroup cGroup(config, group);
             const QString id = cGroup.readEntryUntranslated(QStringLiteral("id"));
             const QString name = cGroup.readEntry("Name");
-            mArchiveDefinitionCB->addItem(name, QVariant(id));
-            if (id == ad_default_id) {
-                mArchiveDefinitionCB->setCurrentIndex(mArchiveDefinitionCB->count() - 1);
-            }
+            mArchiveDefinitionCB.widget()->addItem(name, QVariant(id));
         }
-
     }
+
+    load(EMailOperationsPreferences{}, FileOperationsPreferences{}, Settings{});
 }
 
 void CryptoOperationsConfigWidget::save()
@@ -367,18 +404,22 @@ void CryptoOperationsConfigWidget::save()
     FileOperationsPreferences filePrefs;
     filePrefs.setUsePGPFileExt(mPGPFileExtCB->isChecked());
     filePrefs.setAutoDecryptVerify(mAutoDecryptVerifyCB->isChecked());
+    filePrefs.setAutoExtractArchives(mAutoExtractArchivesCB->isChecked());
     filePrefs.setAddASCIIArmor(mASCIIArmorCB->isChecked());
     filePrefs.setDontUseTmpDir(mTmpDirCB->isChecked());
+    filePrefs.setSymmetricEncryptionOnly(mSymmetricOnlyCB->isChecked());
 
-    const int idx = mChecksumDefinitionCB->currentIndex();
+    Settings settings;
+    const int idx = mChecksumDefinitionCB.widget()->currentIndex();
     if (idx >= 0) {
-        const auto cd = qvariant_cast< std::shared_ptr<ChecksumDefinition> >(mChecksumDefinitionCB->itemData(idx));
-        ChecksumDefinition::setDefaultChecksumDefinition(cd);
+        const auto id = mChecksumDefinitionCB.widget()->itemData(idx).toString();
+        settings.setChecksumDefinitionId(id);
     }
+    settings.save();
 
-    const int aidx = mArchiveDefinitionCB->currentIndex();
+    const int aidx = mArchiveDefinitionCB.widget()->currentIndex();
     if (aidx >= 0) {
-        const QString id = mArchiveDefinitionCB->itemData(aidx).toString();
+        const QString id = mArchiveDefinitionCB.widget()->itemData(aidx).toString();
         filePrefs.setArchiveCommand(id);
     }
     filePrefs.save();

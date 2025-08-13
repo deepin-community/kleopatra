@@ -1,2 +1,1 @@
-disable_kuniqueservicetest.patch
-upstream-a0883f36-no-unsafe-gpghome-dir.patch
+assuan_pkgconf.diff

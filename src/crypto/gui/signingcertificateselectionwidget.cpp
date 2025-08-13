@@ -13,12 +13,13 @@
 
 #include "ui_signingcertificateselectionwidget.h"
 
+#include "utils/keys.h"
+
 #include <Libkleo/KeyCache>
 #include <Libkleo/Formatting>
 #include <Libkleo/Stl_Util>
 
 #include <QByteArray>
-#include <QMap>
 
 
 using namespace Kleo;
@@ -78,9 +79,9 @@ SigningCertificateSelectionWidget::SigningCertificateSelectionWidget(QWidget *pa
 
 SigningCertificateSelectionWidget::~SigningCertificateSelectionWidget() {}
 
-void SigningCertificateSelectionWidget::setSelectedCertificates(const QMap<GpgME::Protocol, GpgME::Key> &certificates)
+void SigningCertificateSelectionWidget::setSelectedCertificates(const CertificatePair &certificates)
 {
-    setSelectedCertificates(certificates[GpgME::OpenPGP], certificates[GpgME::CMS]);
+    setSelectedCertificates(certificates.openpgp, certificates.cms);
 }
 
 void SigningCertificateSelectionWidget::setSelectedCertificates(const GpgME::Key &pgp, const GpgME::Key &cms)
@@ -113,14 +114,12 @@ void SigningCertificateSelectionWidget::Private::addCandidates(GpgME::Protocol p
     }
 }
 
-QMap<GpgME::Protocol, GpgME::Key> SigningCertificateSelectionWidget::selectedCertificates() const
+CertificatePair SigningCertificateSelectionWidget::selectedCertificates() const
 {
-    QMap<GpgME::Protocol, GpgME::Key> res;
-
-    res.insert(GpgME::OpenPGP, current_cert(*d->ui.pgpCombo));
-    res.insert(GpgME::CMS,     current_cert(*d->ui.cmsCombo));
-
-    return res;
+    return {
+        current_cert(*d->ui.pgpCombo),
+        current_cert(*d->ui.cmsCombo),
+    };
 }
 
 bool SigningCertificateSelectionWidget::rememberAsDefault() const

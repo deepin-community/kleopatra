@@ -14,6 +14,8 @@
 #include "kwatchgnupg.h"
 #include "tray.h"
 
+#include "utils/qt-cxx20-compat.h"
+
 #include <QGpgME/Protocol>
 #include <QGpgME/CryptoConfig>
 
@@ -31,7 +33,6 @@
 #include <KShortcutsDialog>
 #include <QIcon>
 #include <KConfigGroup>
-#include <kxmlgui_version.h>
 
 #include <QEventLoop>
 #include <QTextStream>
@@ -40,6 +41,7 @@
 #include <KSharedConfig>
 
 #include <gpgme++/gpgmepp_version.h>
+#include <kwidgetsaddons_version.h>
 #if GPGMEPP_VERSION >= 0x11000 // 1.16.0
 # define CRYPTOCONFIG_HAS_GROUPLESS_ENTRY_OVERLOAD
 #endif
@@ -100,11 +102,7 @@ void KWatchGnuPGMainWindow::createActions()
 
 void KWatchGnuPGMainWindow::configureShortcuts()
 {
-#if KXMLGUI_VERSION < QT_VERSION_CHECK(5,84,0)
-    KShortcutsDialog::configure(actionCollection(), KShortcutsEditor::LetterShortcutsAllowed, this);
-#else
     KShortcutsDialog::showDialog(actionCollection(), KShortcutsEditor::LetterShortcutsAllowed, this);
-#endif
 }
 
 void KWatchGnuPGMainWindow::slotConfigureToolbars()
@@ -138,7 +136,7 @@ void KWatchGnuPGMainWindow::startWatcher()
     mWatcher->start();
     const bool ok = mWatcher->waitForStarted();
     if (!ok) {
-        KMessageBox::sorry(this, i18n("The watchgnupg logging process could not be started.\nPlease install watchgnupg somewhere in your $PATH.\nThis log window is unable to display any useful information."));
+        KMessageBox::error(this, i18n("The watchgnupg logging process could not be started.\nPlease install watchgnupg somewhere in your $PATH.\nThis log window is unable to display any useful information."));
     } else {
         mCentralWidget->append(i18n("[%1] Log started", QDateTime::currentDateTime().toString(Qt::ISODate)));
         mCentralWidget->ensureCursorVisible();
@@ -198,18 +196,28 @@ void KWatchGnuPGMainWindow::setGnuPGConfig()
     }
     cconfig->sync(true);
     if (logclients.isEmpty()) {
-        KMessageBox::sorry(nullptr, i18n("There are no components available that support logging."));
+        KMessageBox::error(nullptr, i18n("There are no components available that support logging."));
     }
 }
 
 void KWatchGnuPGMainWindow::slotWatcherExited(int, QProcess::ExitStatus)
 {
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    if (KMessageBox::questionTwoActions(this,
+                                        i18n("The watchgnupg logging process died.\nDo you want to try to restart it?"),
+                                        QString(),
+                                        KGuiItem(i18n("Try Restart")),
+                                        KGuiItem(i18n("Do Not Try")))
+        == KMessageBox::ButtonCode::PrimaryAction) {
+#else
     if (KMessageBox::questionYesNo(this, i18n("The watchgnupg logging process died.\nDo you want to try to restart it?"), QString(), KGuiItem(i18n("Try Restart")), KGuiItem(i18n("Do Not Try"))) == KMessageBox::Yes) {
+
+#endif
         mCentralWidget->append(i18n("====== Restarting logging process ====="));
         mCentralWidget->ensureCursorVisible();
         startWatcher();
     } else {
-        KMessageBox::sorry(this, i18n("The watchgnupg logging process is not running.\nThis log window is unable to display any useful information."));
+        KMessageBox::error(this, i18n("The watchgnupg logging process is not running.\nThis log window is unable to display any useful information."));
     }
 }
 

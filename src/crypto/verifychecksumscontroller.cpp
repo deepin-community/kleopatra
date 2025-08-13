@@ -10,6 +10,7 @@
 #include <config-kleopatra.h>
 
 #include "verifychecksumscontroller.h"
+#include "checksumsutils_p.h"
 
 #ifndef QT_NO_DIRMODEL
 
@@ -25,7 +26,6 @@
 
 #include <KLocalizedString>
 
-#include "kleopatra_debug.h"
 #include <QPointer>
 #include <QFileInfo>
 #include <QThread>
@@ -44,15 +44,7 @@ using namespace Kleo;
 using namespace Kleo::Crypto;
 using namespace Kleo::Crypto::Gui;
 
-#ifdef Q_OS_UNIX
-static const bool HAVE_UNIX = true;
-#else
-static const bool HAVE_UNIX = false;
-#endif
-
 static const QLatin1String CHECKSUM_DEFINITION_ID_ENTRY("checksum-definition-id");
-
-static const Qt::CaseSensitivity fs_cs = HAVE_UNIX ? Qt::CaseSensitive : Qt::CaseInsensitive; // can we use QAbstractFileEngine::caseSensitive()?
 
 #if 0
 static QStringList fs_sort(QStringList l)
@@ -60,7 +52,7 @@ static QStringList fs_sort(QStringList l)
     int (*QString_compare)(const QString &, const QString &, Qt::CaseSensitivity) = &QString::compare;
     std::sort(l.begin(), l.end(),
               [](const QString &lhs, const QString &rhs) {
-                return QString::compare(lhs, rhs, fs_cs) < 0;
+                return QString::compare(lhs, rhs, ChecksumsUtils::fs_cs) < 0;
               });
     return l;
 }
@@ -75,43 +67,20 @@ static QStringList fs_intersect(QStringList l1, QStringList l2)
                           l2.begin(), l2.end(),
                           std::back_inserter(result),
                           [](const QString &lhs, const QString &rhs) {
-                            return QString::compare(lhs, rhs, fs_cs) < 0;
+                            return QString::compare(lhs, rhs, ChecksumsUtils::fs_cs) < 0;
                           });
     return result;
 }
 #endif
 
-static QList<QRegExp> get_patterns(const std::vector< std::shared_ptr<ChecksumDefinition> > &checksumDefinitions)
-{
-    QList<QRegExp> result;
-    for (const std::shared_ptr<ChecksumDefinition> &cd : checksumDefinitions)
-        if (cd) {
-            const auto patterns = cd->patterns();
-            for (const QString &pattern : patterns) {
-                result.push_back(QRegExp(pattern, fs_cs));
-            }
-        }
-    return result;
-}
-
-namespace
-{
-struct matches_any : std::unary_function<QString, bool> {
-    const QList<QRegExp> m_regexps;
-    explicit matches_any(const QList<QRegExp> &regexps) : m_regexps(regexps) {}
-    bool operator()(const QString &s) const
-    {
-        return std::any_of(m_regexps.cbegin(), m_regexps.cend(),
-                           [&s](const QRegExp &rx) { return rx.exactMatch(s); });
-    }
-};
-struct matches_none_of : std::unary_function<QString, bool> {
-    const QList<QRegExp> m_regexps;
-    explicit matches_none_of(const QList<QRegExp> &regexps) : m_regexps(regexps) {}
+namespace {
+struct matches_none_of {
+    const std::vector<QRegularExpression> m_regexps;
+    explicit matches_none_of(const std::vector<QRegularExpression> &regexps) : m_regexps(regexps) {}
     bool operator()(const QString &s) const
     {
         return std::none_of(m_regexps.cbegin(), m_regexps.cend(),
-                            [&s](const QRegExp &rx) { return rx.exactMatch(s); });
+                            [&s](const QRegularExpression &rx) { return rx.match(s).hasMatch(); });
     }
 };
 }
@@ -249,70 +218,12 @@ struct SumFile {
 
 }
 
-static QStringList filter_checksum_files(QStringList l, const QList<QRegExp> &rxs)
+static QStringList filter_checksum_files(QStringList l, const std::vector<QRegularExpression> &rxs)
 {
     l.erase(std::remove_if(l.begin(), l.end(),
                            matches_none_of(rxs)),
             l.end());
     return l;
-}
-
-namespace
-{
-struct File {
-    QString name;
-    QByteArray checksum;
-    bool binary;
-};
-}
-
-static QString decode(const QString &encoded)
-{
-    QString decoded;
-    decoded.reserve(encoded.size());
-    bool shift = false;
-    for (const QChar &ch : encoded)
-        if (shift) {
-            switch (ch.toLatin1()) {
-            case '\\': decoded += QLatin1Char('\\'); break;
-            case 'n':  decoded += QLatin1Char('\n'); break;
-            default:
-                qCDebug(KLEOPATRA_LOG) << "invalid escape sequence" << '\\' << ch << "(interpreted as '" << ch << "')";
-                decoded += ch;
-                break;
-            }
-            shift = false;
-        } else {
-            if (ch == QLatin1Char('\\')) {
-                shift = true;
-            } else {
-                decoded += ch;
-            }
-        }
-    return decoded;
-}
-
-static std::vector<File> parse_sum_file(const QString &fileName)
-{
-    std::vector<File> files;
-    QFile f(fileName);
-    if (f.open(QIODevice::ReadOnly)) {
-        QTextStream s(&f);
-        QRegExp rx(QLatin1String("(\\?)([a-f0-9A-F]+) ([ *])([^\n]+)\n*"));
-        while (!s.atEnd()) {
-            const QString line = s.readLine();
-            if (rx.exactMatch(line)) {
-                Q_ASSERT(!rx.cap(4).endsWith(QLatin1Char('\n')));
-                const File file = {
-                    rx.cap(1) == QLatin1String("\\") ? decode(rx.cap(4)) : rx.cap(4),
-                    rx.cap(2).toLatin1(),
-                    rx.cap(3) == QLatin1String("*"),
-                };
-                files.push_back(file);
-            }
-        }
-    }
-    return files;
 }
 
 static quint64 aggregate_size(const QDir &dir, const QStringList &files)
@@ -324,46 +235,32 @@ static quint64 aggregate_size(const QDir &dir, const QStringList &files)
     return n;
 }
 
-static std::shared_ptr<ChecksumDefinition> filename2definition(const QString &fileName,
-        const std::vector< std::shared_ptr<ChecksumDefinition> > &checksumDefinitions)
-{
-    for (const std::shared_ptr<ChecksumDefinition> &cd : checksumDefinitions)
-        if (cd) {
-            const auto patterns = cd->patterns();
-            for (const QString &pattern : patterns)
-                if (QRegExp(pattern, fs_cs).exactMatch(fileName)) {
-                    return cd;
-                }
-        }
-    return std::shared_ptr<ChecksumDefinition>();
-}
-
 namespace
 {
-struct less_dir : std::binary_function<QDir, QDir, bool> {
+struct less_dir {
     bool operator()(const QDir &lhs, const QDir &rhs) const
     {
-        return QString::compare(lhs.absolutePath(), rhs.absolutePath(), fs_cs) < 0;
+        return QString::compare(lhs.absolutePath(), rhs.absolutePath(), ChecksumsUtils::fs_cs) < 0;
     }
 };
-struct less_file : std::binary_function<QString, QString, bool> {
+struct less_file {
     bool operator()(const QString &lhs, const QString &rhs) const
     {
-        return QString::compare(lhs, rhs, fs_cs) < 0;
+        return QString::compare(lhs, rhs, ChecksumsUtils::fs_cs) < 0;
     }
 };
-struct sumfile_contains_file : std::unary_function<QString, bool> {
+struct sumfile_contains_file {
     const QDir dir;
     const QString fileName;
     sumfile_contains_file(const QDir &dir_, const QString &fileName_)
         : dir(dir_), fileName(fileName_) {}
     bool operator()(const QString &sumFile) const
     {
-        const std::vector<File> files = parse_sum_file(dir.absoluteFilePath(sumFile));
+        const std::vector<ChecksumsUtils::File> files = ChecksumsUtils::parse_sum_file(dir.absoluteFilePath(sumFile));
         qCDebug(KLEOPATRA_LOG) << "find_sums_by_input_files:      found " << files.size()
                                << " files listed in " << qPrintable(dir.absoluteFilePath(sumFile));
-        for (const File &file : files) {
-            const bool isSameFileName = (QString::compare(file.name, fileName, fs_cs) == 0);
+        for (const ChecksumsUtils::File &file : files) {
+            const bool isSameFileName = (QString::compare(file.name, fileName, ChecksumsUtils::fs_cs) == 0);
             qCDebug(KLEOPATRA_LOG) << "find_sums_by_input_files:        "
                                    << qPrintable(file.name) << " == "
                                    << qPrintable(fileName)  << " ? "
@@ -375,7 +272,6 @@ struct sumfile_contains_file : std::unary_function<QString, bool> {
         return false;
     }
 };
-
 }
 
 // IF is_dir(file)
@@ -427,9 +323,9 @@ static std::vector<SumFile> find_sums_by_input_files(const QStringList &files, Q
         const std::function<void(int)> &progress,
         const std::vector< std::shared_ptr<ChecksumDefinition> > &checksumDefinitions)
 {
-    const QList<QRegExp> patterns = get_patterns(checksumDefinitions);
+    const std::vector<QRegularExpression> patterns = ChecksumsUtils::get_patterns(checksumDefinitions);
 
-    const matches_any is_sum_file(patterns);
+    const ChecksumsUtils::matches_any is_sum_file(patterns);
 
     std::map<QDir, std::set<QString, less_file>, less_dir> dirs2sums;
 
@@ -494,18 +390,18 @@ static std::vector<SumFile> find_sums_by_input_files(const QStringList &files, Q
 
         const QDir &dir = it->first;
 
-        Q_FOREACH (const QString &sumFileName, it->second) {
+        for (const QString &sumFileName : std::as_const(it->second)) {
 
-            const std::vector<File> summedfiles = parse_sum_file(dir.absoluteFilePath(sumFileName));
+            const std::vector<ChecksumsUtils::File> summedfiles = ChecksumsUtils::parse_sum_file(dir.absoluteFilePath(sumFileName));
             QStringList files;
             files.reserve(summedfiles.size());
             std::transform(summedfiles.cbegin(), summedfiles.cend(),
-                           std::back_inserter(files), std::mem_fn(&File::name));
+                           std::back_inserter(files), std::mem_fn(&ChecksumsUtils::File::name));
             const SumFile sumFile = {
                 it->first,
                 sumFileName,
                 aggregate_size(it->first, files),
-                filename2definition(sumFileName, checksumDefinitions),
+                ChecksumsUtils::filename2definition(sumFileName, checksumDefinitions),
             };
             sumfiles.push_back(sumFile);
 
@@ -521,10 +417,11 @@ static std::vector<SumFile> find_sums_by_input_files(const QStringList &files, Q
 
 static QStringList c_lang_environment()
 {
+    static const QRegularExpression re(QRegularExpression::anchoredPattern(u"LANG=.*"), ChecksumsUtils::s_regex_cs);
     QStringList env = QProcess::systemEnvironment();
     env.erase(std::remove_if(env.begin(), env.end(),
                              [](const QString &str) {
-                                 return QRegExp(QLatin1String("^LANG=.*"), fs_cs).exactMatch(str);
+                                 return re.match(str).hasMatch();
                              }),
               env.end());
     env.push_back(QStringLiteral("LANG=C"));
@@ -657,7 +554,7 @@ void VerifyChecksumsController::Private::run()
             const quint64 factor = total / std::numeric_limits<int>::max() + 1;
 
             quint64 done = 0;
-            Q_FOREACH (const SumFile &sumFile, sumfiles) {
+            for (const SumFile &sumFile : sumfiles) {
                 Q_EMIT progress(done / factor, total / factor,
                                 i18n("Verifying checksums (%2) in %1", sumFile.checksumDefinition->label(), sumFile.dir.path()));
                 bool fatal = false;

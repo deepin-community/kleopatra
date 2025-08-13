@@ -18,6 +18,7 @@
 #include "kleopatra_debug.h"
 #include <KLocalizedString>
 
+#include <QStandardPaths>
 #include <QString>
 #include <QStorageInfo>
 #include <QFileInfo>
@@ -52,6 +53,17 @@ QString Kleo::heuristicBaseDirectory(const QStringList &fileNames)
     }
     qCDebug(KLEOPATRA_LOG) << "dirs" << dirs;
     const QString candidate = longestCommonPrefix(dirs);
+    /* Special case handling for Outlook attachment temporary path.
+     * This is otherwise something like:
+     * c:\users\username\AppData\Local\Microsoft\Windows\INetCache\
+     *      Content.Outlook\ADSDFG9\foo.txt
+     *
+     * This is very common when encrypted attachments are opened
+     * within outlook.
+     */
+    if (candidate.contains(QStringLiteral("Content.Outlook"))) {
+        return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    }
     const int idx = candidate.lastIndexOf(QLatin1Char('/'));
     return candidate.left(idx);
 }
@@ -79,12 +91,19 @@ QStringList Kleo::makeRelativeTo(const QDir &baseDir, const QStringList &fileNam
     return rv;
 }
 
+QString Kleo::stripSuffix(const QString &fileName)
+{
+    const QFileInfo fi(fileName);
+    return fi.dir().filePath(fi.completeBaseName());
+}
+
 void Kleo::recursivelyRemovePath(const QString &path)
 {
     const QFileInfo fi(path);
     if (fi.isDir()) {
         QDir dir(path);
-        Q_FOREACH (const QString &fname, dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
+        const auto dirs{dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)};
+        for (const QString &fname : dirs) {
             recursivelyRemovePath(dir.filePath(fname));
         }
         const QString dirName = fi.fileName();
@@ -134,9 +153,13 @@ bool Kleo::recursivelyCopy(const QString &src,const QString &dest)
 
 bool Kleo::moveDir(const QString &src, const QString &dest)
 {
-    if (QStorageInfo(src).device() == QStorageInfo(dest).device()) {
-        // Easy same partition we can use qt.
-        return QFile::rename(src, dest);
+    // Need an existing path to query the device
+    const QString parentDest = QFileInfo(dest).dir().absolutePath();
+    const auto srcDevice = QStorageInfo(src).device();
+    if (!srcDevice.isEmpty() && srcDevice == QStorageInfo(parentDest).device() &&
+        QFile::rename(src, dest)) {
+        qCDebug(KLEOPATRA_LOG) << "Renamed" << src << "to" << dest;
+        return true;
     }
     // first copy
     if (!recursivelyCopy(src, dest)) {

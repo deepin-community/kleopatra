@@ -16,7 +16,6 @@
 #include <utils/pimpl_ptr.h>
 
 #include <gpgme++/global.h>
-#include <kmime/kmime_header_parsing.h>
 
 #include <memory>
 #include <vector>
@@ -32,7 +31,7 @@ class VerifyChecksumsController : public Controller
 public:
     explicit VerifyChecksumsController(QObject *parent = nullptr);
     explicit VerifyChecksumsController(const std::shared_ptr<const ExecutionContext> &ctx, QObject *parent = nullptr);
-    ~VerifyChecksumsController();
+    ~VerifyChecksumsController() override;
 
     void setFiles(const QStringList &files);
 

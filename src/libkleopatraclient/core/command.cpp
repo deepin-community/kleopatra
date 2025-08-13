@@ -34,10 +34,11 @@
 #include <gpg-error.h>
 #include <gpgme++/global.h>
 
+#include <QStandardPaths>
 #include <algorithm>
-#include <string>
-#include <sstream>
 #include <memory>
+#include <sstream>
+#include <string>
 #include <type_traits>
 
 using namespace KleopatraClientCopy;
@@ -433,6 +434,11 @@ static QString gnupg_home_directory()
 
 static QString get_default_socket_name()
 {
+    const QString socketPath{QString::fromUtf8(GpgME::dirInfo("uiserver-socket"))};
+    if (!socketPath.isEmpty()) {
+        // Note: The socket directory exists after GpgME::dirInfo() has been called.
+        return socketPath;
+    }
     const QString homeDir = gnupg_home_directory();
     if (homeDir.isEmpty()) {
         return QString();
@@ -453,11 +459,17 @@ static QString uiserver_executable()
 
 static QString start_uiserver()
 {
-    if (!QProcess::startDetached(uiserver_executable(), QStringList() << QStringLiteral("--daemon"))) {
-        return i18n("Failed to start uiserver %1", uiserver_executable());
-    } else {
-        return QString();
-    }
+  const QString executable = uiserver_executable();
+  const QString exec = QStandardPaths::findExecutable(executable);
+  if (exec.isEmpty()) {
+    qCWarning(LIBKLEOPATRACLIENTCORE_LOG)
+        << "Could not find " << executable << " in PATH.";
+    return i18n("Failed to start uiserver %1", executable);
+  } else {
+    QProcess::startDetached(executable, QStringList()
+                                            << QStringLiteral("--daemon"));
+  }
+  return QString();
 }
 
 static assuan_error_t getinfo_pid_cb(void *opaque, const void *buffer, size_t length)
@@ -573,7 +585,7 @@ void Command::Private::run()
     }
 
 #ifndef HAVE_ASSUAN2
-    err = assuan_socket_connect(&naked_ctx, QFile::encodeName(socketName).constData(), -1);
+    err = assuan_socket_connect(&naked_ctx, socketName.toUtf8().constData(), -1);
 #else
     {
         assuan_context_t naked_ctx = nullptr;
@@ -587,7 +599,7 @@ void Command::Private::run()
         ctx.reset(naked_ctx);
     }
 
-    err = assuan_socket_connect(ctx.get(), QFile::encodeName(socketName).constData(), -1, 0);
+    err = assuan_socket_connect(ctx.get(), socketName.toUtf8().constData(), -1, 0);
 #endif
     if (err) {
         qDebug("UI server not running, starting it");
@@ -656,23 +668,26 @@ void Command::Private::run()
             }
         }
 
-    Q_FOREACH (const QString &filePath, in.filePaths)
+    for (const QString &filePath : std::as_const(in.filePaths)) {
         if ((err = send_file(ctx, filePath))) {
             out.errorString = i18n("Failed to send file path %1: %2", filePath, to_error_string(err));
             goto leave;
         }
+    }
 
-    Q_FOREACH (const QString &sender, in.senders)
+    for (const QString &sender : std::as_const(in.senders)) {
         if ((err = send_sender(ctx, sender, in.areSendersInformative))) {
             out.errorString = i18n("Failed to send sender %1: %2", sender, to_error_string(err));
             goto leave;
         }
+    }
 
-    Q_FOREACH (const QString &recipient, in.recipients)
+    for (const QString &recipient : std::as_const(in.recipients)) {
         if ((err = send_recipient(ctx, recipient, in.areRecipientsInformative))) {
             out.errorString = i18n("Failed to send recipient %1: %2", recipient, to_error_string(err));
             goto leave;
         }
+    }
 
 #if 0
     setup I / O;

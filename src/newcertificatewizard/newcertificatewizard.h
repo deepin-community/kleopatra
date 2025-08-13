@@ -15,6 +15,8 @@
 
 #include <gpgme++/global.h>
 
+class QDir;
+
 namespace Kleo
 {
 
@@ -28,20 +30,26 @@ class NewCertificateWizard : public QWizard
     Q_OBJECT
 public:
     explicit NewCertificateWizard(QWidget *parent = nullptr);
-    ~NewCertificateWizard();
+    ~NewCertificateWizard() override;
 
     void setProtocol(GpgME::Protocol protocol);
     GpgME::Protocol protocol() const;
 
     enum Pages {
-        ChooseProtocolPageId,
         EnterDetailsPageId,
-        OverviewPageId,
         KeyCreationPageId,
         ResultPageId,
 
         NumPages
     };
+
+protected:
+    void showEvent(QShowEvent *event) override;
+
+private:
+    void resetProtocol();
+    void restartAtEnterDetailsPage();
+    QDir tmpDir() const;
 
 private:
     class Private;

@@ -8,6 +8,8 @@
 */
 #include "updatenotification.h"
 
+#include <view/htmllabel.h>
+
 #include <Libkleo/Compat>
 #include <Libkleo/GnuPG>
 
@@ -62,9 +64,11 @@ void UpdateNotification::forceUpdateCheck(QWidget *parent)
     auto proc = new QProcess;
 
     proc->setProgram(gnupgInstallPath() + QStringLiteral("/gpg-connect-agent.exe"));
-    proc->setArguments(QStringList() << QStringLiteral("--dirmngr")
-                       << QStringLiteral("loadswdb --force")
-                       << QStringLiteral("/bye"));
+    proc->setArguments({
+        QStringLiteral("--dirmngr"),
+        QStringLiteral("loadswdb --force"),
+        QStringLiteral("/bye"),
+    });
 
     auto progress = new QProgressDialog(i18n("Searching for updates..."),
                                         i18n("Cancel"), 0, 0, parent);
@@ -79,7 +83,11 @@ void UpdateNotification::forceUpdateCheck(QWidget *parent)
                                    << QString::fromLocal8Bit(proc->readAllStandardError());
     });
 
-    connect(proc, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+#if QT_DEPRECATED_SINCE(5, 13)
+    connect(proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+#else
+    connect(proc, &QProcess::finished,
+#endif
             [parent, progress, proc](int exitCode, QProcess::ExitStatus exitStatus) {
             qCDebug(KLEOPATRA_LOG) << "Update force exited with status:" << exitStatus
                                    << "code:" << exitCode;
@@ -112,7 +120,7 @@ void UpdateNotification::checkUpdate(QWidget *parent, bool force)
         updatecfg.writeEntry("AllowVersionCheckSetOnce", true);
     }
 
-    const auto current = gpg4winVersion();
+    const auto current = gpg4winVersionNumber();
     GpgME::Error err;
     const auto lastshown = updatecfg.readEntry("LastShown", QDateTime());
 
@@ -178,9 +186,9 @@ UpdateNotification::UpdateNotification(QWidget *parent, const QString &version) 
                                           KIconLoader::User);
     logo->setPixmap(QIcon(iconPath).pixmap(100, 100));
 
-    auto label = new QLabel;
+    auto label = new HtmlLabel;
     const QString boldVersion = QStringLiteral("<b>%1</b>").arg(version);
-    label->setText (i18nc("%1 is the version number", "Version %1 is available.", boldVersion) +
+    label->setHtml(i18nc("%1 is the version number", "Version %1 is available.", boldVersion) +
         QStringLiteral("<br><br>") +
         i18nc("Link to NEWS style changelog",
               "See the <a href=\"https://www.gpg4win.org/change-history.html\">new features</a>."));

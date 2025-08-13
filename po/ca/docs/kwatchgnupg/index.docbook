@@ -69,7 +69,7 @@
 
 <abstract>
 <para
->&kwatchgnupg; és un simple visor del registre de &gnupg;. </para>
+>&kwatchgnupg; és un simple visualitzador del registre de &gnupg;. </para>
 </abstract>
 
 
@@ -83,7 +83,7 @@
 <keyword
 >GnuPG</keyword>
 <keyword
->Visor del registre</keyword>
+>Visualitzador del registre</keyword>
 </keywordset>
 
 </bookinfo>
@@ -94,7 +94,7 @@
 > 
 
 <para
->El &kwatchgnupg; és un simple visor del registre per a &gnupg;, per a les versions de &gnupg; 1.4, 2.0 i 2.1. Aquest treballa com a una &IGU; que envolta l'eina a la línia d'ordres, el &watchgnupg; escolta en un sòcol a l'espera de línies de registre per a les aplicacions del dorsal &gnupg;. Per a més informació quant al &watchgnupg; mireu <userinput
+>El &kwatchgnupg; és un simple visualitzador del registre per a &gnupg;, per a les versions de &gnupg; 1.4, 2.0 i 2.1. Aquest treballa com a una &IGU; que envolta l'eina a la línia d'ordres, el &watchgnupg; escolta en un sòcol a l'espera de línies de registre per a les aplicacions del dorsal &gnupg;. Per a més informació quant al &watchgnupg; mireu <userinput
 >info watchgnupg</userinput
 >.</para>
 
@@ -103,7 +103,7 @@
 ><guimenu
 >Eines</guimenu
 ><guimenuitem
->Visor del registre de GnuPG</guimenuitem
+>Visualitzador del registre de GnuPG</guimenuitem
 ></menuchoice
 > tant des de &kleopatra; com &kmail;, així com des de la línia d'ordres. L'executable de &kwatchgnupg; s'anomena <userinput
 >kwatchgnupg</userinput
@@ -121,7 +121,7 @@
 >La funció principal de &kwatchgnupg; és presentar a l'usuari la informació de depuració i de registre de &gnupg;. La finestra principal està dividida en una gran àrea de visualització de text, en la que apareixeran els missatges que generi &gnupg;, una barra d'eines que us donarà accés ràpid a la majoria de les funcions comunes, així com l'obligatòria barra de menús. </para>
 
 <para
->Cada línia del visor de text sol estar precedida amb un identificador <acronym
+>Cada línia del visualitzador de text sol estar precedida amb un identificador <acronym
 >FD</acronym
 > i una marca temporal en format ISO. L'identificador <acronym
 >FD</acronym
@@ -204,7 +204,7 @@
 >Preferències del &watchgnupg;</title>
 
 <para
->&watchgnupg; és el procés que realment controla el sòcol de registre per a l'activitat i formata les línies que podeu veure en la vista de text de &kwatchgnupg;. Les opcions d'aquest grup es passen al dorsal usant el mecanisme &gpgconf;. </para>
+>&watchgnupg; és el procés que realment controla el sòcol de registre per a l'activitat i dona format a les línies que podeu veure en la vista de text de &kwatchgnupg;. Les opcions d'aquest grup es passen al dorsal usant el mecanisme &gpgconf;. </para>
 
 <para
 ><guilabel
@@ -220,7 +220,7 @@
 <para
 ><guilabel
 >Sòcol</guilabel
-> conté el sòcol en el que ha d'escoltar &watchgnupg;. Un canvi aquí es distribueix a tots els mòduls del dorsal &gnupg; usant &gpgconf;, de manera que no haureu de canviar aquesta opció si els fitxers de configuració de &gnupg; tenen establert un altre <varname
+> conté el sòcol en el qual ha d'escoltar &watchgnupg;. Un canvi aquí es distribueix a tots els mòduls del dorsal &gnupg; usant &gpgconf;, de manera que no haureu de canviar aquesta opció si els fitxers de configuració de &gnupg; tenen establert un altre <varname
 >log-file</varname
 >. </para>
 

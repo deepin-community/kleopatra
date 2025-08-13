@@ -44,7 +44,7 @@ class SignClipboardCommand::Private : public Command::Private
     }
 public:
     explicit Private(SignClipboardCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -109,8 +109,8 @@ void SignClipboardCommand::Private::init()
 {
     controller.setExecutionContext(shared_qq);
     controller.setDetachedSignature(false);
-    connect(&controller, SIGNAL(done()), q, SLOT(slotControllerDone()));
-    connect(&controller, SIGNAL(error(int,QString)), q, SLOT(slotControllerError(int,QString)));
+    connect(&controller, &Controller::done, q, [this]() { slotControllerDone(); });
+    connect(&controller, &Controller::error, q, [this](int err, const QString &details) { slotControllerError(err, details); });
 }
 
 SignClipboardCommand::~SignClipboardCommand()
@@ -121,11 +121,13 @@ SignClipboardCommand::~SignClipboardCommand()
 // static
 bool SignClipboardCommand::canSignCurrentClipboard()
 {
-    if (const QClipboard *clip = QApplication::clipboard())
-        if (const QMimeData *mime = clip->mimeData()) {
-            return mime->hasText();
+    bool canSign = false;
+    if (const QClipboard *const clip = QApplication::clipboard()) {
+        if (const QMimeData *const mime = clip->mimeData()) {
+            canSign = mime->hasText();
         }
-    return false;
+    }
+    return canSign;
 }
 
 void SignClipboardCommand::doStart()
@@ -136,8 +138,7 @@ void SignClipboardCommand::doStart()
         // snapshot clipboard content here, in case it's being changed...
         d->input = Input::createFromClipboard();
 
-        connect(&d->controller, SIGNAL(signersResolved()),
-                this, SLOT(slotSignersResolved()));
+        connect(&d->controller, &SignEMailController::signersResolved, this, [this]() { d->slotSignersResolved(); });
 
         d->controller.startResolveSigners();
 

@@ -36,7 +36,7 @@ class ChangePinCommand::Private : public CardCommand::Private
     }
 public:
     explicit Private(ChangePinCommand *qq, const std::string &serialNumber, const std::string &appName, QWidget *p);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -131,7 +131,9 @@ void ChangePinCommand::Private::changePin()
         command << "--nullpin";
     }
     command << QByteArray::fromStdString(keyRef);
-    ReaderStatus::mutableInstance()->startSimpleTransaction(card, command.join(' '), q, "slotResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(card, command.join(' '), q, [this](const GpgME::Error &err) {
+        slotResult(err);
+    });
 }
 
 namespace {
@@ -205,10 +207,9 @@ void ChangePinCommand::Private::slotResult(const GpgME::Error& err)
     qCDebug(KLEOPATRA_LOG) << "ChangePinCommand::slotResult():"
                            << err.asString() << "(" << err.code() << ")";
     if (err) {
-        error(errorMessage(keyRef, mode, QString::fromLatin1(err.asString())),
-              i18nc("@title", "Error"));
+        error(errorMessage(keyRef, mode, QString::fromLatin1(err.asString())));
     } else if (!err.isCanceled()) {
-        information(successMessage(keyRef, mode), i18nc("@title", "Success"));
+        success(successMessage(keyRef, mode));
         ReaderStatus::mutableInstance()->updateStatus();
     }
     finished();

@@ -18,7 +18,6 @@
 
 #include <QWizard>
 
-#include <QVector>
 #include <QMap>
 
 #include <memory>
@@ -47,17 +46,17 @@ class SignEncryptFilesWizard : public QWizard
 {
     Q_OBJECT
 public:
-    enum KindNames{
+    enum KindNames {
         SignatureCMS,
+        SignaturePGP,
         CombinedPGP,
         EncryptedPGP,
         EncryptedCMS,
-        SignaturePGP,
         Directory
     };
 
     explicit SignEncryptFilesWizard(QWidget *parent = nullptr, Qt::WindowFlags f = {});
-    ~SignEncryptFilesWizard();
+    ~SignEncryptFilesWizard() override;
 
     // Inputs
     void setSigningPreset(bool preset);
@@ -69,6 +68,8 @@ public:
     void setArchiveForced(bool archive);
     void setArchiveMutable(bool archive);
 
+    void setSingleFile(bool singleFile);
+
     void setOutputNames(const QMap<int, QString> &nameMap) const;
     QMap<int, QString> outputNames() const;
 
@@ -79,7 +80,7 @@ public:
     std::vector<GpgME::Key> resolvedSigners() const;
     bool encryptSymmetric() const;
 
-    void setLabelText(const QString &label) const;
+    void setLabelText(const QString &label);
 
 protected:
     void readConfig();
@@ -94,7 +95,6 @@ private Q_SLOTS:
 private:
     SigEncPage *mSigEncPage = nullptr;
     ResultPage *mResultPage = nullptr;
-    QAbstractButton *mLabel = nullptr;
     bool mSigningUserMutable = true;
     bool mEncryptionUserMutable = true;
 };

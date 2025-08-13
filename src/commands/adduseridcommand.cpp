@@ -3,6 +3,8 @@
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2008 Klarälvdalens Datakonsult AB
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -14,21 +16,20 @@
 #include "command_p.h"
 
 #include "dialogs/adduseriddialog.h"
-#include "dialogs/addemaildialog.h"
 
 #include <Libkleo/Formatting>
 #include <QGpgME/Protocol>
-#include <QGpgME/AddUserIDJob>
+#include <QGpgME/QuickJob>
+
+#include <QObjectCleanupHandler>
 
 #include <gpgme++/key.h>
 
 #include <KLocalizedString>
 #include "kleopatra_debug.h"
 
-
 using namespace Kleo;
 using namespace Kleo::Commands;
-using namespace Kleo::Dialogs;
 using namespace GpgME;
 
 class AddUserIDCommand::Private : public Command::Private
@@ -40,13 +41,10 @@ class AddUserIDCommand::Private : public Command::Private
     }
 public:
     explicit Private(AddUserIDCommand *qq, KeyListController *c);
-    ~Private();
-
-    void init();
+    ~Private() override;
 
 private:
     void slotDialogAccepted();
-    void slotSimpleDialogAccepted();
     void slotDialogRejected();
     void slotResult(const Error &err);
 
@@ -58,9 +56,9 @@ private:
 
 private:
     GpgME::Key key;
+    QObjectCleanupHandler cleaner;
     QPointer<AddUserIDDialog> dialog;
-    QPointer<AddEmailDialog> simpleDialog;
-    QPointer<QGpgME::AddUserIDJob> job;
+    QPointer<QGpgME::QuickJob> job;
 };
 
 AddUserIDCommand::Private *AddUserIDCommand::d_func()
@@ -76,97 +74,50 @@ const AddUserIDCommand::Private *AddUserIDCommand::d_func() const
 #define q q_func()
 
 AddUserIDCommand::Private::Private(AddUserIDCommand *qq, KeyListController *c)
-    : Command::Private(qq, c),
-      key(),
-      dialog(),
-      job()
+    : Command::Private{qq, c}
 {
-
 }
 
-AddUserIDCommand::Private::~Private()
-{
-    qCDebug(KLEOPATRA_LOG);
-    if (dialog) {
-        delete dialog;
-    }
-    if (simpleDialog) {
-        delete simpleDialog;
-    }
-}
-
-AddUserIDCommand::AddUserIDCommand(KeyListController *c)
-    : Command(new Private(this, c))
-{
-    d->init();
-}
+AddUserIDCommand::Private::~Private() = default;
 
 AddUserIDCommand::AddUserIDCommand(QAbstractItemView *v, KeyListController *c)
-    : Command(v, new Private(this, c))
+    : Command{v, new Private{this, c}}
 {
-    d->init();
 }
 
 AddUserIDCommand::AddUserIDCommand(const GpgME::Key &key)
-    : Command(key, new Private(this, nullptr))
+    : Command{key, new Private{this, nullptr}}
 {
-    d->init();
-}
-
-void AddUserIDCommand::Private::init()
-{
-
 }
 
 AddUserIDCommand::~AddUserIDCommand()
 {
-    qCDebug(KLEOPATRA_LOG);
+    qCDebug(KLEOPATRA_LOG).nospace() << this << "::" << __func__;
 }
 
 void AddUserIDCommand::doStart()
 {
-
     const std::vector<Key> keys = d->keys();
-    if (keys.size() != 1 ||
-            keys.front().protocol() != GpgME::OpenPGP ||
-            !keys.front().hasSecret()) {
+    if (keys.size() != 1) {
         d->finished();
         return;
     }
 
     d->key = keys.front();
+    if (d->key.protocol() != GpgME::OpenPGP
+        || !d->key.hasSecret()) {
+        d->finished();
+        return;
+    }
 
     d->ensureDialogCreated();
-    Q_ASSERT(d->dialog);
 
     const UserID uid = d->key.userID(0);
 
-    // d->simpleDialog->setEmail(Formatting::prettyEMail(uid.email(), uid.id()));
-
     d->dialog->setName(QString::fromUtf8(uid.name()));
     d->dialog->setEmail(Formatting::prettyEMail(uid.email(), uid.id()));
-    d->dialog->setComment(QString::fromUtf8(uid.comment()));
 
-    d->simpleDialog->show();
-}
-
-void AddUserIDCommand::Private::slotSimpleDialogAccepted()
-{
-    if (simpleDialog->advancedSelected()) {
-        qDebug() << "thinking advanced selected";
-        dialog->show();
-        return;
-    }
-
-    createJob();
-    if (!job) {
-        finished();
-        return;
-    }
-    if (const Error err = job->start(key, QString(), simpleDialog->email(), QString())) {
-        showErrorDialog(err);
-        finished();
-    }
+    d->dialog->show();
 }
 
 void AddUserIDCommand::Private::slotDialogAccepted()
@@ -176,12 +127,9 @@ void AddUserIDCommand::Private::slotDialogAccepted()
     createJob();
     if (!job) {
         finished();
+        return;
     }
-
-    else if (const Error err = job->start(key, dialog->name(), dialog->email(), dialog->comment())) {
-        showErrorDialog(err);
-        finished();
-    }
+    job->startAddUid(key, dialog->userID());
 }
 
 void AddUserIDCommand::Private::slotDialogRejected()
@@ -192,9 +140,8 @@ void AddUserIDCommand::Private::slotDialogRejected()
 
 void AddUserIDCommand::Private::slotResult(const Error &err)
 {
-    if (err.isCanceled())
-        ;
-    else if (err) {
+    if (err.isCanceled()) {
+    } else if (err) {
         showErrorDialog(err);
     } else {
         showSuccessDialog();
@@ -204,7 +151,7 @@ void AddUserIDCommand::Private::slotResult(const Error &err)
 
 void AddUserIDCommand::doCancel()
 {
-    qCDebug(KLEOPATRA_LOG);
+    qCDebug(KLEOPATRA_LOG).nospace() << this << "::" << __func__;
     if (d->job) {
         d->job->slotCancel();
     }
@@ -217,36 +164,31 @@ void AddUserIDCommand::Private::ensureDialogCreated()
     }
 
     dialog = new AddUserIDDialog;
+    cleaner.add(dialog);
     applyWindowID(dialog);
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
-
-    simpleDialog = new AddEmailDialog;
-    applyWindowID(simpleDialog);
-
-    connect(simpleDialog, SIGNAL(accepted()), q, SLOT(slotSimpleDialogAccepted()));
-    connect(simpleDialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 void AddUserIDCommand::Private::createJob()
 {
     Q_ASSERT(!job);
 
-    const auto backend = (key.protocol() == GpgME::OpenPGP) ? QGpgME::openpgp() : QGpgME::smime();
+    const auto backend = QGpgME::openpgp();
     if (!backend) {
         return;
     }
 
-    QGpgME::AddUserIDJob *const j = backend->addUserIDJob();
+    const auto j = backend->quickJob();
     if (!j) {
         return;
     }
 
     connect(j, &QGpgME::Job::progress,
             q, &Command::progress);
-    connect(j, SIGNAL(result(GpgME::Error)),
-            q, SLOT(slotResult(GpgME::Error)));
+    connect(j, &QGpgME::QuickJob::result,
+            q, [this](const GpgME::Error &err) { slotResult(err); });
 
     job = j;
 }
@@ -254,16 +196,16 @@ void AddUserIDCommand::Private::createJob()
 void AddUserIDCommand::Private::showErrorDialog(const Error &err)
 {
     error(xi18nc("@info",
-                 "<para>An error occurred while trying to add the user-id: "
+                 "<para>An error occurred while trying to add the user ID: "
                  "<message>%1</message></para>",
                  QString::fromLocal8Bit(err.asString())),
-          i18nc("@title:window", "Add User-ID Error"));
+          i18nc("@title:window", "Add User ID Error"));
 }
 
 void AddUserIDCommand::Private::showSuccessDialog()
 {
-    information(i18nc("@info", "User-ID successfully added."),
-                i18nc("@title:window", "Add User-ID Succeeded"));
+    information(i18nc("@info", "User ID successfully added."),
+                i18nc("@title:window", "Add User ID Succeeded"));
 }
 
 #undef d

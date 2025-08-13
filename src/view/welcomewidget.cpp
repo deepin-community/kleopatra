@@ -1,4 +1,4 @@
-/*  view/smartcardwidget.h
+/*  view/welcomewidget.cpp
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2017 Bundesamt für Sicherheit in der Informationstechnik
@@ -7,19 +7,23 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
+#include <config-kleopatra.h>
+
 #include "welcomewidget.h"
+
+#include "htmllabel.h"
 
 #include <version-kleopatra.h>
 #include <Libkleo/GnuPG>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QToolButton>
-#include <QLabel>
 #include <QAction>
 
 #include "commands/importcertificatefromfilecommand.h"
-#include "commands/newcertificatecommand.h"
+#include "commands/newopenpgpcertificatecommand.h"
 
 #include <KLocalizedString>
 #include <KSharedConfig>
@@ -33,6 +37,56 @@ static const QString templ = QStringLiteral(
 "");
 
 using namespace Kleo;
+
+namespace
+{
+/**
+ * A tool button that can be activated with the Enter and Return keys additionally to the Space key.
+ */
+class ToolButton : public QToolButton
+{
+    Q_OBJECT
+public:
+    using QToolButton::QToolButton;
+
+protected:
+    void keyPressEvent(QKeyEvent *e) override
+    {
+        switch (e->key()) {
+        case Qt::Key_Enter:
+        case Qt::Key_Return: {
+            // forward as key press of Key_Select to QToolButton
+            QKeyEvent alternateEvent{e->type(), Qt::Key_Select, e->modifiers(), e->nativeScanCode(), e->nativeVirtualKey(), e->nativeModifiers(), e->text(), e->isAutoRepeat(), static_cast<ushort>(e->count())};
+            QToolButton::keyPressEvent(&alternateEvent);
+            if (!alternateEvent.isAccepted()) {
+                e->ignore();
+            }
+            break;
+        }
+        default:
+            QToolButton::keyPressEvent(e);
+        }
+    }
+
+    void keyReleaseEvent(QKeyEvent *e) override
+    {
+        switch (e->key()) {
+        case Qt::Key_Enter:
+        case Qt::Key_Return: {
+            // forward as key release of Key_Select to QToolButton
+            QKeyEvent alternateEvent{e->type(), Qt::Key_Select, e->modifiers(), e->nativeScanCode(), e->nativeVirtualKey(), e->nativeModifiers(), e->text(), e->isAutoRepeat(), static_cast<ushort>(e->count())};
+            QToolButton::keyReleaseEvent(&alternateEvent);
+            if (!alternateEvent.isAccepted()) {
+                e->ignore();
+            }
+            break;
+        }
+        default:
+            QToolButton::keyReleaseEvent(e);
+        }
+    }
+};
+}
 
 class WelcomeWidget::Private
 {
@@ -59,9 +113,10 @@ public:
                                       "https://en.wikipedia.org/wiki/Public-key_cryptography");
         const QString learnMore = i18nc("%1 is link a wiki article", "You can learn more about this on <a href=\"%1\">Wikipedia</a>.", wikiUrl);
 
-        auto label = new QLabel(templ.arg(welcome).arg(introduction).arg(keyExplanation).arg(privateKeyExplanation).arg(publicKeyExplanation).arg(learnMore));
-        label->setTextInteractionFlags(Qt::TextBrowserInteraction);
-        label->setOpenExternalLinks(true);
+        const auto labelText = templ.arg(welcome).arg(introduction).arg(keyExplanation).arg(privateKeyExplanation).arg(publicKeyExplanation).arg(learnMore);
+        mLabel = new HtmlLabel{labelText, q};
+        mLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+        mLabel->setOpenExternalLinks(true);
 
         auto genKeyAction = new QAction(q);
         genKeyAction->setText(i18n("New Key Pair..."));
@@ -74,22 +129,30 @@ public:
         connect(importAction, &QAction::triggered, q, [this] () { import(); });
         connect(genKeyAction, &QAction::triggered, q, [this] () { generate(); });
 
-        mGenerateBtn = new QToolButton();
+        mGenerateBtn = new ToolButton{q};
         mGenerateBtn->setDefaultAction(genKeyAction);
         mGenerateBtn->setIconSize(QSize(64, 64));
         mGenerateBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        mGenerateBtn->setToolTip(i18n("Create a new OpenPGP key pair") + QStringLiteral("<br>") +
-                                 i18n("To create an S/MIME certificate request use \"New Key Pair\" from the 'File' Menu instead"));
+        const auto generateBtnDescription = kxi18nc("@info",
+                                                    "Create a new OpenPGP key pair.<nl/>"
+                                                    "To create an S/MIME certificate request use "
+                                                    "<interface>New S/MIME Certification Request</interface> "
+                                                    "from the <interface>File</interface> menu instead.");
+        mGenerateBtn->setToolTip(generateBtnDescription.toString());
+        mGenerateBtn->setAccessibleDescription(generateBtnDescription.toString(Kuit::PlainText));
 
         KConfigGroup restrictions(KSharedConfig::openConfig(), "KDE Action Restrictions");
         mGenerateBtn->setEnabled(restrictions.readEntry("action/file_new_certificate", true));
 
-        mImportBtn = new QToolButton();
+        mImportBtn = new ToolButton{q};
         mImportBtn->setDefaultAction(importAction);
         mImportBtn->setIconSize(QSize(64, 64));
         mImportBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        mImportBtn->setToolTip(i18n("Import from a file.") + QStringLiteral("<br>") +
-                               i18n("To import from a public keyserver use \"Lookup on Server\" instead."));
+        const auto importBtnDescription = kxi18nc("@info",
+                                                  "Import certificate from a file.<nl/>"
+                                                  "To import from a public keyserver use <interface>Lookup on Server</interface> instead.");
+        mImportBtn->setToolTip(importBtnDescription.toString());
+        mImportBtn->setAccessibleDescription(importBtnDescription.toString(Kuit::PlainText));
         mImportBtn->setEnabled(restrictions.readEntry("action/file_import_certificate", true));
 
         auto btnLayout = new QHBoxLayout;
@@ -104,7 +167,7 @@ public:
         vLay->addStretch(-1);
 
         hLay->addStretch(-1);
-        hLay->addWidget(label);
+        hLay->addWidget(mLabel);
         hLay->addStretch(-1);
     }
 
@@ -124,11 +187,10 @@ public:
     void generate()
     {
         mGenerateBtn->setEnabled(false);
-        auto cmd = new Commands::NewCertificateCommand();
-        cmd->setProtocol(GpgME::OpenPGP);
+        auto cmd = new NewOpenPGPCertificateCommand;
         cmd->setParentWidget(q);
 
-        QObject::connect(cmd, &Commands::NewCertificateCommand::finished,
+        QObject::connect(cmd, &NewOpenPGPCertificateCommand::finished,
                 q, [this]() {
             mGenerateBtn->setEnabled(true);
         });
@@ -136,8 +198,9 @@ public:
     }
 
     WelcomeWidget *const q;
-    QToolButton *mGenerateBtn;
-    QToolButton *mImportBtn;
+    HtmlLabel *mLabel = nullptr;
+    ToolButton *mGenerateBtn = nullptr;
+    ToolButton *mImportBtn = nullptr;
 };
 
 
@@ -145,3 +208,10 @@ WelcomeWidget::WelcomeWidget (QWidget *parent): QWidget(parent),
     d(new Private(this))
 {
 }
+
+void WelcomeWidget::focusFirstChild(Qt::FocusReason reason)
+{
+    d->mLabel->setFocus(reason);
+}
+
+#include "welcomewidget.moc"

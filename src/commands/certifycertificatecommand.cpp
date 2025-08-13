@@ -11,14 +11,16 @@
 #include <config-kleopatra.h>
 
 #include "certifycertificatecommand.h"
-#include "newcertificatecommand.h"
+#include "newopenpgpcertificatecommand.h"
 
 #include "command_p.h"
 
 #include "exportopenpgpcertstoservercommand.h"
 #include "dialogs/certifycertificatedialog.h"
+#include "utils/keys.h"
 #include "utils/tags.h"
 
+#include <Libkleo/Algorithm>
 #include <Libkleo/KeyCache>
 #include <Libkleo/Formatting>
 
@@ -30,13 +32,9 @@
 
 #include <gpgme++/key.h>
 
-#include <KLocalizedString>
 #include "kleopatra_debug.h"
-
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E00 // 1.14.0
-# define GPGME_HAS_REMARKS
-#endif
+#include <KLocalizedString>
+#include <kwidgetsaddons_version.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
@@ -52,7 +50,7 @@ class CertifyCertificateCommand::Private : public Command::Private
     }
 public:
     explicit Private(CertifyCertificateCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -66,6 +64,7 @@ private:
     void createJob();
 
 private:
+    GpgME::Key target;
     std::vector<UserID> uids;
     QPointer<CertifyCertificateDialog> dialog;
     QPointer<QGpgME::SignKeyJob> job;
@@ -143,75 +142,88 @@ CertifyCertificateCommand::~CertifyCertificateCommand()
 
 void CertifyCertificateCommand::doStart()
 {
-
     const std::vector<Key> keys = d->keys();
     if (keys.size() != 1 ||
             keys.front().protocol() != GpgME::OpenPGP) {
         d->finished();
         return;
     }
+    // hold on to the key to certify to avoid invalidation during refreshes of the key cache
+    d->target = keys.front();
 
-    std::vector<Key> secKeys;
-    Q_FOREACH (const Key &secKey, KeyCache::instance()->secretKeys()) {
-        // Only include usable keys.
-        if (secKey.canCertify() && secKey.protocol() == OpenPGP && !secKey.isRevoked() &&
-            !secKey.isExpired() && !secKey.isInvalid()) {
-            secKeys.push_back(secKey);
-        }
+    if (d->target.isExpired() || d->target.isRevoked()) {
+        const auto title = d->target.isRevoked() ? i18nc("@title:window", "Key is Revoked") : i18nc("@title:window", "Key is Expired");
+        const auto message = d->target.isRevoked() //
+            ? i18nc("@info", "This key has been revoked. You cannot certify it.")
+            : i18nc("@info", "This key has expired. You cannot certify it.");
+        d->information(message, title);
+        d->finished();
+        return;
     }
 
-    if (secKeys.empty()) {
+    auto findAnyGoodKey = []() {
+        const std::vector<Key> secKeys = KeyCache::instance()->secretKeys();
+        return std::any_of(secKeys.cbegin(), secKeys.cend(), [](const Key &secKey) {
+            return secKey.canCertify() && secKey.protocol() == OpenPGP && !secKey.isRevoked()
+                   && !secKey.isExpired() && !secKey.isInvalid();
+        });
+    };
+
+    if (!findAnyGoodKey()) {
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+        auto sel =
+            KMessageBox::questionTwoActions(d->parentWidgetOrView(),
+#else
         auto sel = KMessageBox::questionYesNo(d->parentWidgetOrView(),
-                    xi18nc("@info", "To certify other certificates, you first need to create an OpenPGP certificate for yourself.") +
-                    QStringLiteral("<br><br>") +
-                    i18n("Do you wish to create one now?"),
-                    i18n("Certification Not Possible"));
+#endif
+                                            xi18nc("@info", "To certify other certificates, you first need to create an OpenPGP certificate for yourself.")
+                                                + QStringLiteral("<br><br>") + i18n("Do you wish to create one now?"),
+                                            i18n("Certification Not Possible"),
+                                            KGuiItem(i18n("Create")),
+                                            KStandardGuiItem::cancel());
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+        if (sel == KMessageBox::ButtonCode::PrimaryAction) {
+#else
         if (sel == KMessageBox::Yes) {
+#endif
             QEventLoop loop;
-            auto cmd = new Commands::NewCertificateCommand();
+            auto cmd = new NewOpenPGPCertificateCommand;
             cmd->setParentWidget(d->parentWidgetOrView());
-            cmd->setProtocol(GpgME::OpenPGP);
-            loop.connect(cmd, SIGNAL(finished()), SLOT(quit()));
-            QMetaObject::invokeMethod(cmd, &Commands::NewCertificateCommand::start, Qt::QueuedConnection);
+            connect(cmd, &Command::finished, &loop, &QEventLoop::quit);
+            QMetaObject::invokeMethod(cmd, &NewOpenPGPCertificateCommand::start, Qt::QueuedConnection);
             loop.exec();
         } else {
             Q_EMIT(canceled());
             d->finished();
             return;
         }
-        Q_FOREACH (const Key &secKey, KeyCache::instance()->secretKeys()) {
-            // Check again for secret keys
-            if (secKey.canCertify() && secKey.protocol() == OpenPGP && !secKey.isRevoked() &&
-                !secKey.isExpired() && !secKey.isInvalid()) {
-                secKeys.push_back(secKey);
-            }
-        }
-        if (secKeys.empty()) {
+
+        // Check again for secret keys
+        if (!findAnyGoodKey()) {
             qCDebug(KLEOPATRA_LOG) << "Sec Keys still empty after keygen.";
             Q_EMIT(canceled());
             d->finished();
             return;
         }
     }
-    const Key &key = keys.front();
 
-    for (const UserID &uid : std::as_const(d->uids))
-        if (qstricmp(uid.parent().primaryFingerprint(), key.primaryFingerprint()) != 0) {
-            qCWarning(KLEOPATRA_LOG) << "User-ID <-> Key mismatch!";
-            d->finished();
-            return;
-        }
+    const char *primary = keys.front().primaryFingerprint();
+    const bool anyMismatch = std::any_of(d->uids.cbegin(), d->uids.cend(), [primary](const UserID &uid) {
+        return qstricmp(uid.parent().primaryFingerprint(), primary) != 0;
+    });
+    if (anyMismatch) {
+        qCWarning(KLEOPATRA_LOG) << "User ID <-> Key mismatch!";
+        d->finished();
+        return;
+    }
 
     d->ensureDialogCreated();
     Q_ASSERT(d->dialog);
 
-    Key target = d->key();
-#ifdef GPGME_HAS_REMARKS
-    if (!(target.keyListMode() & GpgME::SignatureNotations)) {
-        target.update();
+    if (!(d->target.keyListMode() & GpgME::SignatureNotations)) {
+        d->target.update();
     }
-#endif
-    d->dialog->setCertificateToCertify(target);
+    d->dialog->setCertificateToCertify(d->target);
     if (d->uids.size()) {
         d->dialog->setSelectedUserIDs(d->uids);
     }
@@ -227,7 +239,7 @@ void CertifyCertificateCommand::Private::slotDialogRejected()
 void CertifyCertificateCommand::Private::slotResult(const Error &err)
 {
     if (!err && !err.isCanceled() && dialog && dialog->exportableCertificationSelected() && dialog->sendToServer()) {
-        auto const cmd = new ExportOpenPGPCertsToServerCommand(key());
+        auto const cmd = new ExportOpenPGPCertsToServerCommand(target);
         cmd->start();
     } else if (!err) {
         information(i18n("Certification successful."),
@@ -235,7 +247,7 @@ void CertifyCertificateCommand::Private::slotResult(const Error &err)
     } else {
         error(i18n("<p>An error occurred while trying to certify<br/><br/>"
                    "<b>%1</b>:</p><p>\t%2</p>",
-              Formatting::formatForComboBox(key()),
+              Formatting::formatForComboBox(target),
               QString::fromUtf8(err.asString())),
               i18n("Certification Error"));
     }
@@ -250,34 +262,40 @@ void CertifyCertificateCommand::Private::slotCertificationPrepared()
 {
     Q_ASSERT(dialog);
 
+    const auto selectedUserIds = dialog->selectedUserIDs();
+    std::vector<unsigned int> userIdIndexes;
+    userIdIndexes.reserve(selectedUserIds.size());
+    for (unsigned int i = 0, numUserIds = target.numUserIDs(); i < numUserIds; ++i) {
+        const auto userId = target.userID(i);
+        const bool userIdIsSelected = Kleo::any_of(selectedUserIds, [userId](const auto &uid) {
+            return Kleo::userIDsAreEqual(userId, uid);
+        });
+        if (userIdIsSelected) {
+            userIdIndexes.push_back(i);
+        }
+    }
+
     createJob();
     Q_ASSERT(job);
     job->setExportable(dialog->exportableCertificationSelected());
     job->setNonRevocable(dialog->nonRevocableCertificationSelected());
-    job->setUserIDsToSign(dialog->selectedUserIDs());
+    job->setUserIDsToSign(userIdIndexes);
     job->setSigningKey(dialog->selectedSecretKey());
     job->setCheckLevel(dialog->selectedCheckLevel());
-#ifdef GPGME_HAS_REMARKS
     if (!dialog->tags().isEmpty()) {
         // do not set an empty remark to avoid an empty signature notation (GnuPG bug T5142)
         job->setRemark(dialog->tags());
     }
-    // This also came with 1.14.0
     job->setDupeOk(true);
-#endif
-#ifdef QGPGME_SUPPORTS_TRUST_SIGNATURES
     if (dialog->trustSignatureSelected() && !dialog->trustSignatureDomain().isEmpty()) {
         // always create level 1 trust signatures with complete trust
         job->setTrustSignature(TrustSignatureTrust::Complete, 1, dialog->trustSignatureDomain());
     }
-#endif
-#ifdef QGPGME_SUPPORTS_SIGNATURE_EXPIRATION
     if (!dialog->expirationDate().isNull()) {
         job->setExpirationDate(dialog->expirationDate());
     }
-#endif
 
-    if (const Error err = job->start(key())) {
+    if (const Error err = job->start(target)) {
         slotResult(err);
     }
 }
@@ -299,15 +317,15 @@ void CertifyCertificateCommand::Private::ensureDialogCreated()
     dialog = new CertifyCertificateDialog;
     applyWindowID(dialog);
 
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotCertificationPrepared()));
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
+    connect(dialog, &QDialog::accepted, q, [this]() { slotCertificationPrepared(); });
 }
 
 void CertifyCertificateCommand::Private::createJob()
 {
     Q_ASSERT(!job);
 
-    Q_ASSERT(key().protocol() == OpenPGP);
+    Q_ASSERT(target.protocol() == OpenPGP);
     const auto backend = QGpgME::openpgp();
     if (!backend) {
         return;
@@ -320,8 +338,7 @@ void CertifyCertificateCommand::Private::createJob()
 
     connect(j, &Job::progress,
             q, &Command::progress);
-    connect(j, SIGNAL(result(GpgME::Error)),
-            q, SLOT(slotResult(GpgME::Error)));
+    connect(j, &SignKeyJob::result, q, [this](const GpgME::Error &result) { slotResult(result); });
 
     job = j;
 }
