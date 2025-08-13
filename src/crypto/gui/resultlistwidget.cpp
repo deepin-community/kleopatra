@@ -15,6 +15,7 @@
 
 #include <crypto/gui/resultitemwidget.h>
 
+#include <utils/gui-helper.h>
 #include <utils/scrollarea.h>
 
 #include <Libkleo/Stl_Util>
@@ -43,8 +44,6 @@ public:
     void allTasksDone();
 
     void addResultWidget(ResultItemWidget *widget);
-    void setupSingle();
-    void setupMulti();
     void resizeIfStandalone();
 
     std::vector< std::shared_ptr<TaskCollection> > m_collections;
@@ -63,6 +62,16 @@ ResultListWidget::Private::Private(ResultListWidget *qq)
     m_layout = new QVBoxLayout(q);
     m_layout->setContentsMargins(0, 0, 0, 0);
     m_layout->setSpacing(0);
+
+    m_scrollArea = new ScrollArea;
+    m_scrollArea->setFocusPolicy(Qt::NoFocus);
+    auto scrollAreaLayout = qobject_cast<QBoxLayout *>(m_scrollArea->widget()->layout());
+    Q_ASSERT(scrollAreaLayout);
+    scrollAreaLayout->setContentsMargins(0, 0, 0, 0);
+    scrollAreaLayout->setSpacing(2);
+    scrollAreaLayout->addStretch();
+    m_layout->addWidget(m_scrollArea);
+
     m_progressLabel = new QLabel;
     m_progressLabel->setWordWrap(true);
     m_layout->addWidget(m_progressLabel);
@@ -73,6 +82,7 @@ ResultListWidget::Private::Private(ResultListWidget *qq)
     q->connect(m_closeButton, &QPushButton::clicked, q, &ResultListWidget::close);
     m_layout->addWidget(m_closeButton);
     m_closeButton->setVisible(false);
+    m_closeButton->setEnabled(false);
 }
 
 ResultListWidget::ResultListWidget(QWidget *parent, Qt::WindowFlags f) : QWidget(parent, f), d(new Private(this))
@@ -89,31 +99,11 @@ ResultListWidget::~ResultListWidget()
     prefs.save();
 }
 
-void ResultListWidget::Private::setupSingle()
-{
-    m_layout->addStretch();
-}
-
 void ResultListWidget::Private::resizeIfStandalone()
 {
     if (m_standaloneMode) {
         q->resize(q->size().expandedTo(q->sizeHint()));
     }
-}
-
-void ResultListWidget::Private::setupMulti()
-{
-    if (m_scrollArea) {
-        return;    // already been here...
-    }
-
-    m_scrollArea = new ScrollArea;
-    m_scrollArea->setFocusPolicy(Qt::NoFocus);
-    Q_ASSERT(qobject_cast<QBoxLayout *>(m_scrollArea->widget()->layout()));
-    static_cast<QBoxLayout *>(m_scrollArea->widget()->layout())->setContentsMargins(0, 0, 0, 0);
-    static_cast<QBoxLayout *>(m_scrollArea->widget()->layout())->setSpacing(2);
-    static_cast<QBoxLayout *>(m_scrollArea->widget()->layout())->addStretch();
-    m_layout->insertWidget(0, m_scrollArea);
 }
 
 void ResultListWidget::Private::addResultWidget(ResultItemWidget *widget)
@@ -124,9 +114,17 @@ void ResultListWidget::Private::addResultWidget(ResultItemWidget *widget)
 
     Q_ASSERT(m_scrollArea);
     Q_ASSERT(m_scrollArea->widget());
-    Q_ASSERT(qobject_cast<QBoxLayout *>(m_scrollArea->widget()->layout()));
-    QBoxLayout &blay = *static_cast<QBoxLayout *>(m_scrollArea->widget()->layout());
-    blay.insertWidget(widget->hasErrorResult() ? m_lastErrorItemIndex++ : (blay.count() - 1), widget);
+    auto scrollAreaLayout = qobject_cast<QBoxLayout *>(m_scrollArea->widget()->layout());
+    Q_ASSERT(scrollAreaLayout);
+    // insert new widget after last widget showing error or before the trailing stretch
+    const auto insertIndex = widget->hasErrorResult() ? m_lastErrorItemIndex++ : scrollAreaLayout->count() - 1;
+    scrollAreaLayout->insertWidget(insertIndex, widget);
+    if (insertIndex == 0) {
+        forceSetTabOrder(m_scrollArea->widget(), widget);
+    } else {
+        auto previousResultWidget = qobject_cast<ResultItemWidget *>(scrollAreaLayout->itemAt(insertIndex - 1)->widget());
+        QWidget::setTabOrder(previousResultWidget, widget);
+    }
 
     widget->show();
     resizeIfStandalone();
@@ -187,7 +185,6 @@ void ResultListWidget::addTaskCollection(const std::shared_ptr<TaskCollection> &
     connect(coll.get(), SIGNAL(started(std::shared_ptr<Kleo::Crypto::Task>)),
             this, SLOT(started(std::shared_ptr<Kleo::Crypto::Task>)));
     connect(coll.get(), SIGNAL(done()), this, SLOT(allTasksDone()));
-    d->setupMulti();
     setStandaloneMode(d->m_standaloneMode);
 }
 
@@ -206,6 +203,7 @@ void ResultListWidget::setStandaloneMode(bool standalone)
         return;
     }
     d->m_closeButton->setVisible(standalone);
+    d->m_closeButton->setEnabled(standalone);
     d->m_progressLabel->setVisible(standalone);
 }
 

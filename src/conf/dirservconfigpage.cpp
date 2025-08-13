@@ -4,6 +4,9 @@
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2004, 2008 Klarälvdalens Datakonsult AB
 
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
+
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
@@ -11,10 +14,15 @@
 
 #include "dirservconfigpage.h"
 
+#include "labelledwidget.h"
+
+#include <settings.h>
+
 #include <Libkleo/Compat>
 #include <Libkleo/DirectoryServicesWidget>
 #include <Libkleo/KeyserverConfig>
 
+#include <QGpgME/CryptoConfig>
 #include <QGpgME/Protocol>
 
 #include <KMessageBox>
@@ -37,87 +45,13 @@
 using namespace Kleo;
 using namespace QGpgME;
 
-#if 0 // disabled, since it is apparently confusing
-// For sync'ing kabldaprc
-class KABSynchronizer
-{
-public:
-    KABSynchronizer()
-        : mConfig("kabldaprc")
-    {
-        mConfig.setGroup("LDAP");
-    }
+// Option for configuring X.509 servers (available via gpgconf since GnuPG 2.3.5 and 2.2.34)
+static const char s_x509services_componentName[] = "dirmngr";
+static const char s_x509services_entryName[] = "ldapserver";
 
-    KUrl::List readCurrentList() const
-    {
-
-        KUrl::List lst;
-        // stolen from kabc/ldapclient.cpp
-        const uint numHosts = mConfig.readEntry("NumSelectedHosts");
-        for (uint j = 0; j < numHosts; j++) {
-            const QString num = QString::number(j);
-
-            KUrl url;
-            url.setProtocol("ldap");
-            url.setPath("/");   // workaround KUrl parsing bug
-            const QString host = mConfig.readEntry(QString("SelectedHost") + num).trimmed();
-            url.setHost(host);
-
-            const int port = mConfig.readEntry(QString("SelectedPort") + num);
-            if (port != 0) {
-                url.setPort(port);
-            }
-
-            const QString base = mConfig.readEntry(QString("SelectedBase") + num).trimmed();
-            url.setQuery(base);
-
-            const QString bindDN = mConfig.readEntry(QString("SelectedBind") + num).trimmed();
-            url.setUser(bindDN);
-
-            const QString pwdBindDN = mConfig.readEntry(QString("SelectedPwdBind") + num).trimmed();
-            url.setPass(pwdBindDN);
-            lst.append(url);
-        }
-        return lst;
-    }
-
-    void writeList(const KUrl::List &lst)
-    {
-
-        mConfig.writeEntry("NumSelectedHosts", lst.count());
-
-        KUrl::List::const_iterator it = lst.begin();
-        KUrl::List::const_iterator end = lst.end();
-        unsigned j = 0;
-        for (; it != end; ++it, ++j) {
-            const QString num = QString::number(j);
-            KUrl url = *it;
-
-            Q_ASSERT(url.scheme() == "ldap");
-            mConfig.writeEntry(QString("SelectedHost") + num, url.host());
-            mConfig.writeEntry(QString("SelectedPort") + num, url.port());
-
-            // KUrl automatically encoded the query (e.g. for spaces inside it),
-            // so decode it before writing it out
-            const QString base = KUrl::decode_string(url.query().mid(1));
-            mConfig.writeEntry(QString("SelectedBase") + num, base);
-            mConfig.writeEntry(QString("SelectedBind") + num, url.user());
-            mConfig.writeEntry(QString("SelectedPwdBind") + num, url.pass());
-        }
-        mConfig.sync();
-    }
-
-private:
-    KConfig mConfig;
-};
-
-#endif
-
-static const char s_x509services_componentName[] = "gpgsm";
-static const char s_x509services_entryName[] = "keyserver";
-
-static const char s_x509services_legacy_componentName[] = "dirmngr";
-static const char s_x509services_legacy_entryName[] = "LDAP Server";
+// Legacy option for configuring X.509 servers (deprecated with GnuPG 2.2.28 and 2.3.2)
+static const char s_x509services_legacy_componentName[] = "gpgsm";
+static const char s_x509services_legacy_entryName[] = "keyserver";
 
 static const char s_pgpservice_componentName[] = "dirmngr";
 static const char s_pgpservice_entryName[] = "keyserver";
@@ -132,16 +66,53 @@ static const char s_timeout_entryName[] = "ldaptimeout";
 static const char s_maxitems_componentName[] = "dirmngr";
 static const char s_maxitems_entryName[] = "max-replies";
 
-#ifdef NOT_USEFUL_CURRENTLY
-static const char s_addnewservers_componentName[] = "dirmngr";
-static const char s_addnewservers_entryName[] = "add-servers";
-#endif
+class DirectoryServicesConfigurationPage::Private
+{
+    DirectoryServicesConfigurationPage *q = nullptr;
 
-DirectoryServicesConfigurationPage::DirectoryServicesConfigurationPage(QWidget *parent, const QVariantList &args)
-    : KCModule(parent, args)
+public:
+    Private(DirectoryServicesConfigurationPage *q);
+
+    void load();
+    void save();
+    void defaults();
+
+private:
+    enum EntryMultiplicity {
+        SingleValue,
+        ListValue
+    };
+    enum ShowError {
+        DoNotShowError,
+        DoShowError
+    };
+
+    void setX509ServerEntry(const std::vector<KeyserverConfig> &servers);
+    void load(const Kleo::Settings &settings);
+
+    QGpgME::CryptoConfigEntry *configEntry(const char *componentName,
+                                           const char *entryName,
+                                           QGpgME::CryptoConfigEntry::ArgType argType,
+                                           EntryMultiplicity multiplicity,
+                                           ShowError showError);
+
+    Kleo::LabelledWidget<QLineEdit> mOpenPGPKeyserverEdit;
+    Kleo::DirectoryServicesWidget *mDirectoryServices = nullptr;
+    Kleo::LabelledWidget<QTimeEdit> mTimeout;
+    Kleo::LabelledWidget<QSpinBox> mMaxItems;
+    QCheckBox *mFetchMissingSignerKeysCB = nullptr;
+
+    QGpgME::CryptoConfigEntry *mOpenPGPServiceEntry = nullptr;
+    QGpgME::CryptoConfigEntry *mTimeoutConfigEntry = nullptr;
+    QGpgME::CryptoConfigEntry *mMaxItemsConfigEntry = nullptr;
+
+    QGpgME::CryptoConfig *mConfig = nullptr;
+};
+
+DirectoryServicesConfigurationPage::Private::Private(DirectoryServicesConfigurationPage *q)
 {
     mConfig = QGpgME::cryptoConfig();
-    auto glay = new QGridLayout(this);
+    auto glay = new QGridLayout(q);
     glay->setContentsMargins(0, 0, 0, 0);
 
     // OpenPGP keyserver
@@ -150,33 +121,35 @@ DirectoryServicesConfigurationPage::DirectoryServicesConfigurationPage(QWidget *
         auto l = new QHBoxLayout{};
         l->setContentsMargins(0, 0, 0, 0);
 
-        l->addWidget(new QLabel{i18n("OpenPGP keyserver:"), this});
-        mOpenPGPKeyserverEdit = new QLineEdit{this};
-
-        l->addWidget(mOpenPGPKeyserverEdit);
+        mOpenPGPKeyserverEdit.createWidgets(q);
+        mOpenPGPKeyserverEdit.label()->setText(i18n("OpenPGP keyserver:"));
+        l->addWidget(mOpenPGPKeyserverEdit.label());
+        l->addWidget(mOpenPGPKeyserverEdit.widget());
 
         glay->addLayout(l, row, 0, 1, 3);
-        connect(mOpenPGPKeyserverEdit, &QLineEdit::textEdited, this, [this]() { Q_EMIT changed(true); });
+        connect(mOpenPGPKeyserverEdit.widget(), &QLineEdit::textEdited,
+                q, &DirectoryServicesConfigurationPage::markAsChanged);
     }
 
     // X.509 servers
-    ++row;
-    {
-        auto groupBox = new QGroupBox{i18n("X.509 Directory Services"), this};
+    if (Settings{}.cmsEnabled()) {
+        ++row;
+        auto groupBox = new QGroupBox{i18n("X.509 Directory Services"), q};
         auto groupBoxLayout = new QVBoxLayout{groupBox};
 
         if (gpgme_check_version("1.16.0")) {
-            mWidget = new Kleo::DirectoryServicesWidget(this);
-            if (QLayout *l = mWidget->layout()) {
+            mDirectoryServices = new Kleo::DirectoryServicesWidget(q);
+            if (QLayout *l = mDirectoryServices->layout()) {
                 l->setContentsMargins(0, 0, 0, 0);
             }
-            groupBoxLayout->addWidget(mWidget);
-            connect(mWidget, SIGNAL(changed()), this, SLOT(changed()));
+            groupBoxLayout->addWidget(mDirectoryServices);
+            connect(mDirectoryServices, &DirectoryServicesWidget::changed,
+                    q, &DirectoryServicesConfigurationPage::markAsChanged);
         } else {
             // QGpgME does not properly support keyserver flags for X.509 keyservers (added in GnuPG 2.2.28);
             // disable the configuration to prevent the configuration from being corrupted
             groupBoxLayout->addWidget(new QLabel{i18n("Configuration of directory services is not possible "
-                                                      "because the used gpgme libraries are too old."), this});
+                                                      "because the used gpgme libraries are too old."), q});
         }
 
         glay->addWidget(groupBox, row, 0, 1, 3);
@@ -184,58 +157,86 @@ DirectoryServicesConfigurationPage::DirectoryServicesConfigurationPage(QWidget *
 
     // LDAP timeout
     ++row;
-    auto label = new QLabel(i18n("LDAP &timeout (minutes:seconds):"), this);
-    mTimeout = new QTimeEdit(this);
-    mTimeout->setDisplayFormat(QStringLiteral("mm:ss"));
-    connect(mTimeout, SIGNAL(timeChanged(QTime)), this, SLOT(changed()));
-    label->setBuddy(mTimeout);
-    glay->addWidget(label, row, 0);
-    glay->addWidget(mTimeout, row, 1);
+    mTimeout.createWidgets(q);
+    mTimeout.label()->setText(i18n("LDAP &timeout (minutes:seconds):"));
+    mTimeout.widget()->setDisplayFormat(QStringLiteral("mm:ss"));
+    connect(mTimeout.widget(), &QTimeEdit::timeChanged,
+            q, &DirectoryServicesConfigurationPage::markAsChanged);
+    glay->addWidget(mTimeout.label(), row, 0);
+    glay->addWidget(mTimeout.widget(), row, 1);
 
     // Max number of items returned by queries
     ++row;
-    mMaxItemsLabel = new QLabel(i18n("&Maximum number of items returned by query:"), this);
-    mMaxItems = new QSpinBox(this);
-    mMaxItems->setMinimum(0);
-    mMaxItemsLabel->setBuddy(mMaxItems);
-    connect(mMaxItems, SIGNAL(valueChanged(int)), this, SLOT(changed()));
-    glay->addWidget(mMaxItemsLabel, row, 0);
-    glay->addWidget(mMaxItems, row, 1);
+    mMaxItems.createWidgets(q);
+    mMaxItems.label()->setText(i18n("&Maximum number of items returned by query:"));
+    mMaxItems.widget()->setMinimum(0);
+#if QT_DEPRECATED_SINCE(5, 14)
+    connect(mMaxItems.widget(), qOverload<int>(&QSpinBox::valueChanged),
+            q, &DirectoryServicesConfigurationPage::markAsChanged);
+#else
+    connect(mMaxItems.widget(), &QSpinBox::valueChanged,
+            q, &DirectoryServicesConfigurationPage::markAsChanged);
+#endif
+    glay->addWidget(mMaxItems.label(), row, 0);
+    glay->addWidget(mMaxItems.widget(), row, 1);
 
-#ifdef NOT_USEFUL_CURRENTLY
-    ++row
-    mAddNewServersCB = new QCheckBox(i18n("Automatically add &new servers discovered in CRL distribution points"), this);
-    connect(mAddNewServersCB, SIGNAL(clicked()), this, SLOT(changed()));
-    glay->addWidget(mAddNewServersCB, row, 0, 1, 3);
+#ifdef QGPGME_SUPPORTS_RECEIVING_KEYS_BY_KEY_ID
+    ++row;
+    mFetchMissingSignerKeysCB = new QCheckBox{q};
+    mFetchMissingSignerKeysCB->setText(i18nc("@option:check",
+                                             "Retrieve missing certification keys when importing new keys"));
+    mFetchMissingSignerKeysCB->setToolTip(
+        xi18nc("@info:tooltip",
+               "If enabled, then Kleopatra will automatically try to retrieve the keys "
+               "that were used to certify the user IDs of newly imported OpenPGP keys."));
+    connect(mFetchMissingSignerKeysCB, &QCheckBox::toggled,
+            q, &DirectoryServicesConfigurationPage::markAsChanged);
+    glay->addWidget(mFetchMissingSignerKeysCB, row, 0, 1, 3);
 #endif
 
     glay->setRowStretch(++row, 1);
     glay->setColumnStretch(2, 1);
-
-    load();
 }
 
-void DirectoryServicesConfigurationPage::load()
+static auto readKeyserverConfigs(const CryptoConfigEntry *configEntry)
 {
-    if (mWidget) {
-        mWidget->clear();
+    std::vector<KeyserverConfig> servers;
+    if (configEntry) {
+        const auto urls = configEntry->urlValueList();
+        servers.reserve(urls.size());
+        std::transform(std::begin(urls), std::end(urls),
+                       std::back_inserter(servers),
+                       &KeyserverConfig::fromUrl);
+    }
+    return servers;
+}
 
-        // gpgsm's keyserver option is not provided by very old gpgconf versions
-        mX509ServicesEntry = configEntry(s_x509services_componentName, s_x509services_entryName,
-                                        CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoNotShowError);
-        if (!mX509ServicesEntry) {
-            mX509ServicesEntry = configEntry(s_x509services_legacy_componentName, s_x509services_legacy_entryName,
-                                            CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoShowError);
-        }
-        if (mX509ServicesEntry) {
-            std::vector<KeyserverConfig> servers;
-            const auto urls = mX509ServicesEntry->urlValueList();
-            servers.reserve(urls.size());
-            std::transform(std::begin(urls), std::end(urls), std::back_inserter(servers), [](const auto &url) { return KeyserverConfig::fromUrl(url); });
-            mWidget->setKeyservers(servers);
-            mWidget->setReadOnly(mX509ServicesEntry->isReadOnly());
+void DirectoryServicesConfigurationPage::Private::load(const Kleo::Settings &settings)
+{
+    if (mDirectoryServices) {
+        mDirectoryServices->clear();
+
+        // gpgsm uses the deprecated keyserver option in gpgsm.conf additionally to the ldapserver option in dirmngr.conf;
+        // we (try to) read servers from both entries, but always write to the newest existing entry
+        const auto *const newEntry = configEntry(s_x509services_componentName, s_x509services_entryName,
+                                                 CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoNotShowError);
+        const auto *const legacyEntry = configEntry(s_x509services_legacy_componentName, s_x509services_legacy_entryName,
+                                                    CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoNotShowError);
+        auto entry = newEntry ? newEntry : legacyEntry;
+        if (entry) {
+            const auto additionalServers = readKeyserverConfigs(legacyEntry);
+            auto servers = readKeyserverConfigs(newEntry);
+            std::copy(std::begin(additionalServers), std::end(additionalServers),
+                      std::back_inserter(servers));
+            mDirectoryServices->setKeyservers(servers);
+            mDirectoryServices->setReadOnly(entry->isReadOnly());
         } else {
-            mWidget->setDisabled(true);
+            qCWarning(KLEOPATRA_LOG) << "Unknown or wrong typed config entries"
+                << s_x509services_componentName << "/" << s_x509services_entryName
+                << "and"
+                << s_x509services_legacy_componentName << "/" << s_x509services_legacy_entryName;
+
+            mDirectoryServices->setDisabled(true);
         }
     }
 
@@ -261,18 +262,18 @@ void DirectoryServicesConfigurationPage::load()
                 << s_pgpservice_componentName << "/" << s_pgpservice_entryName;
         }
 
-        mOpenPGPKeyserverEdit->setText(mOpenPGPServiceEntry && mOpenPGPServiceEntry->isSet() ? mOpenPGPServiceEntry->stringValue() : QString());
-        mOpenPGPKeyserverEdit->setEnabled(mOpenPGPServiceEntry && !mOpenPGPServiceEntry->isReadOnly());
+        mOpenPGPKeyserverEdit.widget()->setText(mOpenPGPServiceEntry && mOpenPGPServiceEntry->isSet() ? mOpenPGPServiceEntry->stringValue() : QString());
+        mOpenPGPKeyserverEdit.setEnabled(mOpenPGPServiceEntry && !mOpenPGPServiceEntry->isReadOnly());
 #ifdef QGPGME_CRYPTOCONFIGENTRY_HAS_DEFAULT_VALUE
         if (newEntry && !newEntry->defaultValue().isNull()) {
-            mOpenPGPKeyserverEdit->setPlaceholderText(newEntry->defaultValue().toString());
+            mOpenPGPKeyserverEdit.widget()->setPlaceholderText(newEntry->defaultValue().toString());
         } else
 #endif
         {
             if (GpgME::engineInfo(GpgME::GpgEngine).engineVersion() < "2.1.16") {
-                mOpenPGPKeyserverEdit->setPlaceholderText(QStringLiteral("hkp://keys.gnupg.net"));
+                mOpenPGPKeyserverEdit.widget()->setPlaceholderText(QStringLiteral("hkp://keys.gnupg.net"));
             } else {
-                mOpenPGPKeyserverEdit->setPlaceholderText(QStringLiteral("hkps://hkps.pool.sks-keyservers.net"));
+                mOpenPGPKeyserverEdit.widget()->setPlaceholderText(QStringLiteral("hkps://hkps.pool.sks-keyservers.net"));
             }
         }
     }
@@ -290,8 +291,9 @@ void DirectoryServicesConfigurationPage::load()
                                 static_cast<int>(mTimeoutConfigEntry->uintValue());
         const QTime time = QTime(0, 0, 0, 0).addSecs(ldapTimeout);
         //qCDebug(KLEOPATRA_LOG) <<"timeout:" << mTimeoutConfigEntry->uintValue() <<"  ->" << time;
-        mTimeout->setTime(time);
+        mTimeout.widget()->setTime(time);
     }
+    mTimeout.setEnabled(mTimeoutConfigEntry && !mTimeoutConfigEntry->isReadOnly());
 
     // read max-replies config entry
     // first try to read the config entry as int (GnuPG 2.3)
@@ -304,20 +306,23 @@ void DirectoryServicesConfigurationPage::load()
         const int value = mMaxItemsConfigEntry->argType() == CryptoConfigEntry::ArgType_Int ?
                           mMaxItemsConfigEntry->intValue() :
                           static_cast<int>(mMaxItemsConfigEntry->uintValue());
-        mMaxItems->blockSignals(true);   // KNumInput emits valueChanged from setValue!
-        mMaxItems->setValue(value);
-        mMaxItems->blockSignals(false);
+        mMaxItems.widget()->blockSignals(true);   // KNumInput emits valueChanged from setValue!
+        mMaxItems.widget()->setValue(value);
+        mMaxItems.widget()->blockSignals(false);
     }
-    const bool maxItemsEnabled = mMaxItemsConfigEntry && !mMaxItemsConfigEntry->isReadOnly();
-    mMaxItems->setEnabled(maxItemsEnabled);
-    mMaxItemsLabel->setEnabled(maxItemsEnabled);
+    mMaxItems.setEnabled(mMaxItemsConfigEntry && !mMaxItemsConfigEntry->isReadOnly());
 
-#ifdef NOT_USEFUL_CURRENTLY
-    mAddNewServersConfigEntry = configEntry(s_addnewservers_componentName, s_addnewservers_groupName, s_addnewservers_entryName, CryptoConfigEntry::ArgType_None, SingleValue, DoShowError);
-    if (mAddNewServersConfigEntry) {
-        mAddNewServersCB->setChecked(mAddNewServersConfigEntry->boolValue());
-    }
+#ifdef QGPGME_SUPPORTS_RECEIVING_KEYS_BY_KEY_ID
+    mFetchMissingSignerKeysCB->setChecked(settings.retrieveSignerKeysAfterImport());
+    mFetchMissingSignerKeysCB->setEnabled(!settings.isImmutable(QStringLiteral("RetrieveSignerKeysAfterImport")));
+#else
+    Q_UNUSED(settings)
 #endif
+}
+
+void DirectoryServicesConfigurationPage::Private::load()
+{
+    load(Settings{});
 }
 
 namespace
@@ -339,81 +344,95 @@ void updateIntegerConfigEntry(QGpgME::CryptoConfigEntry *configEntry, int value)
 }
 }
 
-void DirectoryServicesConfigurationPage::save()
+void DirectoryServicesConfigurationPage::Private::setX509ServerEntry(const std::vector<KeyserverConfig> &servers)
 {
-    if (mX509ServicesEntry && mWidget) {
-        QList<QUrl> urls;
-        const auto servers = mWidget->keyservers();
-        urls.reserve(servers.size());
-        std::transform(std::begin(servers), std::end(servers), std::back_inserter(urls), [](const auto &server) { return server.toUrl(); });
-        mX509ServicesEntry->setURLValueList(urls);
+    const auto newEntry = configEntry(s_x509services_componentName, s_x509services_entryName,
+                                      CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoNotShowError);
+    const auto legacyEntry = configEntry(s_x509services_legacy_componentName, s_x509services_legacy_entryName,
+                                         CryptoConfigEntry::ArgType_LDAPURL, ListValue, DoNotShowError);
+
+    if ((newEntry && newEntry->isReadOnly()) || (legacyEntry && legacyEntry->isReadOnly())) {
+        // do not change the config entries if either config entry is read-only
+        return;
+    }
+    QList<QUrl> urls;
+    urls.reserve(servers.size());
+    std::transform(std::begin(servers), std::end(servers),
+                   std::back_inserter(urls),
+                   std::mem_fn(&KeyserverConfig::toUrl));
+    if (newEntry) {
+        // write all servers to the new config entry
+        newEntry->setURLValueList(urls);
+        // and clear the legacy config entry
+        if (legacyEntry) {
+            legacyEntry->setURLValueList({});
+        }
+    } else if (legacyEntry) {
+        // write all servers to the legacy config entry if the new entry is not available
+        legacyEntry->setURLValueList(urls);
+    } else {
+        qCWarning(KLEOPATRA_LOG) << "Could not store the X.509 servers. Unknown or wrong typed config entries"
+            << s_x509services_componentName << "/" << s_x509services_entryName
+            << "and"
+            << s_x509services_legacy_componentName << "/" << s_x509services_legacy_entryName;
+    }
+}
+
+void DirectoryServicesConfigurationPage::Private::save()
+{
+    if (mDirectoryServices && mDirectoryServices->isEnabled()) {
+        setX509ServerEntry(mDirectoryServices->keyservers());
     }
 
     if (mOpenPGPServiceEntry) {
-        const auto keyserver = mOpenPGPKeyserverEdit->text();
-        const auto keyserverUrl = keyserver.contains(QLatin1String{"://"}) ? keyserver : (QLatin1String{"hkps://"} + keyserver);
-        mOpenPGPServiceEntry->setStringValue(keyserverUrl);
+        const auto keyserver = mOpenPGPKeyserverEdit.widget()->text().trimmed();
+        if (keyserver.isEmpty()) {
+            mOpenPGPServiceEntry->resetToDefault();
+        } else {
+            const auto keyserverUrl = keyserver.contains(QLatin1String{"://"}) ? keyserver : (QLatin1String{"hkps://"} + keyserver);
+            mOpenPGPServiceEntry->setStringValue(keyserverUrl);
+        }
     }
 
-    const QTime time{mTimeout->time()};
+    const QTime time{mTimeout.widget()->time()};
     updateIntegerConfigEntry(mTimeoutConfigEntry, time.minute() * 60 + time.second());
 
-    updateIntegerConfigEntry(mMaxItemsConfigEntry, mMaxItems->value());
-
-#ifdef NOT_USEFUL_CURRENTLY
-    if (mAddNewServersConfigEntry && mAddNewServersConfigEntry->boolValue() != mAddNewServersCB->isChecked()) {
-        mAddNewServersConfigEntry->setBoolValue(mAddNewServersCB->isChecked());
-    }
-#endif
+    updateIntegerConfigEntry(mMaxItemsConfigEntry, mMaxItems.widget()->value());
 
     mConfig->sync(true);
 
-#if 0
-    // Also write the LDAP URLs to kabldaprc so that they are used by kaddressbook
-    KABSynchronizer sync;
-    const KUrl::List toAdd = mWidget->urlList();
-    KUrl::List currentList = sync.readCurrentList();
-
-    KUrl::List::const_iterator it = toAdd.begin();
-    KUrl::List::const_iterator end = toAdd.end();
-    for (; it != end; ++it) {
-        // check if the URL is already in currentList
-        if (currentList.find(*it) == currentList.end())
-            // if not, add it
-        {
-            currentList.append(*it);
-        }
-    }
-    sync.writeList(currentList);
+#ifdef QGPGME_SUPPORTS_RECEIVING_KEYS_BY_KEY_ID
+    Settings settings;
+    settings.setRetrieveSignerKeysAfterImport(mFetchMissingSignerKeysCB->isChecked());
+    settings.save();
 #endif
 }
 
-void DirectoryServicesConfigurationPage::defaults()
+void DirectoryServicesConfigurationPage::Private::defaults()
 {
     // these guys don't have a default, to clear them:
-    if (mX509ServicesEntry) {
-        mX509ServicesEntry->setURLValueList(QList<QUrl>());
+    if (mDirectoryServices && mDirectoryServices->isEnabled()) {
+        setX509ServerEntry({});
     }
-    if (mOpenPGPServiceEntry) {
+    if (mOpenPGPServiceEntry && !mOpenPGPServiceEntry->isReadOnly()) {
         mOpenPGPServiceEntry->setStringValue(QString());
     }
     // these presumably have a default, use that one:
-    if (mTimeoutConfigEntry) {
+    if (mTimeoutConfigEntry && !mTimeoutConfigEntry->isReadOnly()) {
         mTimeoutConfigEntry->resetToDefault();
     }
-    if (mMaxItemsConfigEntry) {
+    if (mMaxItemsConfigEntry && !mMaxItemsConfigEntry->isReadOnly()) {
         mMaxItemsConfigEntry->resetToDefault();
     }
-#ifdef NOT_USEFUL_CURRENTLY
-    if (mAddNewServersConfigEntry) {
-        mAddNewServersConfigEntry->resetToDefault();
-    }
-#endif
-    load();
+
+    Settings settings;
+    settings.setRetrieveSignerKeysAfterImport(settings.findItem(QStringLiteral("RetrieveSignerKeysAfterImport"))->getDefault().toBool());
+
+    load(settings);
 }
 
 // Find config entry for ldap servers. Implements runtime checks on the configuration option.
-CryptoConfigEntry *DirectoryServicesConfigurationPage::configEntry(const char *componentName,
+CryptoConfigEntry *DirectoryServicesConfigurationPage::Private::configEntry(const char *componentName,
         const char *entryName,
         CryptoConfigEntry::ArgType argType,
         EntryMultiplicity multiplicity,
@@ -422,15 +441,38 @@ CryptoConfigEntry *DirectoryServicesConfigurationPage::configEntry(const char *c
     CryptoConfigEntry *const entry = Kleo::getCryptoConfigEntry(mConfig, componentName, entryName);
     if (!entry) {
         if (showError == DoShowError) {
-            KMessageBox::error(this, i18n("Backend error: gpgconf does not seem to know the entry for %1/%2", QLatin1String(componentName), QLatin1String(entryName)));
+            KMessageBox::error(q, i18n("Backend error: gpgconf does not seem to know the entry for %1/%2", QLatin1String(componentName), QLatin1String(entryName)));
         }
         return nullptr;
     }
     if (entry->argType() != argType || entry->isList() != bool(multiplicity)) {
         if (showError == DoShowError) {
-            KMessageBox::error(this, i18n("Backend error: gpgconf has wrong type for %1/%2: %3 %4", QLatin1String(componentName), QLatin1String(entryName), entry->argType(), entry->isList()));
+            KMessageBox::error(q, i18n("Backend error: gpgconf has wrong type for %1/%2: %3 %4", QLatin1String(componentName), QLatin1String(entryName), entry->argType(), entry->isList()));
         }
         return nullptr;
     }
     return entry;
+}
+
+DirectoryServicesConfigurationPage::DirectoryServicesConfigurationPage(QWidget *parent, const QVariantList &args)
+    : KCModule{parent, args}
+    , d{new Private{this}}
+{
+}
+
+DirectoryServicesConfigurationPage::~DirectoryServicesConfigurationPage() = default;
+
+void DirectoryServicesConfigurationPage::load()
+{
+    d->load();
+}
+
+void DirectoryServicesConfigurationPage::save()
+{
+    d->save();
+}
+
+void DirectoryServicesConfigurationPage::defaults()
+{
+    d->defaults();
 }

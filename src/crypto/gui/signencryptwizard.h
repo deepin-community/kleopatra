@@ -15,8 +15,8 @@
 
 #include <utils/pimpl_ptr.h>
 
+#include <KMime/HeaderParsing>
 #include <gpgme++/global.h>
-#include <kmime/kmime_header_parsing.h>
 
 #include <memory>
 #include <vector>
@@ -53,14 +53,16 @@ public:
     explicit SignEncryptWizard(QWidget *parent = nullptr, Qt::WindowFlags f = {});
     ~SignEncryptWizard() override;
 
-    enum Page {
-        ResolveSignerPage = 0,
-        ObjectsPage,
-        ResolveRecipientsPage,
-        ResultPage
+    struct Page {
+        enum Id {
+            ResolveSigner = 0,
+            Objects,
+            ResolveRecipients,
+            Result,
+        };
     };
 
-    void setCommitPage(Page);
+    void setCommitPage(Page::Id);
 
     GpgME::Protocol presetProtocol() const;
     void setPresetProtocol(GpgME::Protocol proto);
@@ -119,11 +121,11 @@ Q_SIGNALS:
     void recipientsResolved();
 
 protected:
-    Gui::SignerResolvePage *signerResolvePage();
-    const Gui::SignerResolvePage *signerResolvePage() const;
-    Gui::ObjectsPage *objectsPage();
-    Gui::ResultPage *resultPage();
-    Gui::ResolveRecipientsPage *resolveRecipientsPage();
+    SignerResolvePage *signerResolvePage();
+    const SignerResolvePage *signerResolvePage() const;
+    ObjectsPage *objectsPage();
+    ResultPage *resultPage();
+    ResolveRecipientsPage *resolveRecipientsPage();
 
     void setSignerResolvePageValidator(const std::shared_ptr<SignerResolvePage::Validator> &validator);
 

@@ -11,6 +11,7 @@
 
 #include "cardcommand_p.h"
 
+#include "smartcard/algorithminfo.h"
 #include "smartcard/pivcard.h"
 #include "smartcard/readerstatus.h"
 
@@ -43,7 +44,7 @@ class PIVGenerateCardKeyCommand::Private : public CardCommand::Private
     }
 public:
     explicit Private(PIVGenerateCardKeyCommand *qq, const std::string &serialNumber, QWidget *p);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -197,7 +198,9 @@ void PIVGenerateCardKeyCommand::Private::generateKey()
         command << "--algo=" + QByteArray::fromStdString(algorithm);
     }
     command << "--" << QByteArray::fromStdString(keyRef);
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command.join(' '), q, "slotResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command.join(' '), q, [this](const GpgME::Error &err) {
+        slotResult(err);
+    });
 }
 
 void PIVGenerateCardKeyCommand::Private::slotResult(const GpgME::Error& err)
@@ -212,10 +215,9 @@ void PIVGenerateCardKeyCommand::Private::slotResult(const GpgME::Error& err)
         }
 #endif
 
-        error(i18nc("@info", "Generating key failed: %1", QString::fromLatin1(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Generating key failed: %1", QString::fromLatin1(err.asString())));
     } else if (!err.isCanceled()) {
-        information(i18nc("@info", "Key successfully generated."), i18nc("@title", "Success"));
+        success(i18nc("@info", "Key successfully generated."));
         ReaderStatus::mutableInstance()->updateStatus();
     }
     finished();
@@ -244,8 +246,8 @@ void PIVGenerateCardKeyCommand::Private::ensureDialogCreated()
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setSupportedAlgorithms(PIVCard::supportedAlgorithms(keyRef), "rsa2048");
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 #undef d

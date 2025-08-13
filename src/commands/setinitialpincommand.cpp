@@ -35,14 +35,14 @@ class SetInitialPinCommand::Private : public CardCommand::Private
     }
 public:
     explicit Private(SetInitialPinCommand *qq, const std::string &serialNumber);
-    ~Private();
+    ~Private() override;
 
 private:
     void init()
     {
     }
 
-    void ensureDialogCreated() const
+    void ensureDialogCreated()
     {
         if (dialog) {
             return;
@@ -53,10 +53,10 @@ private:
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle(i18nc("@title:window", "Set Initial Pin"));
 
-        connect(dlg, SIGNAL(nksPinRequested()), q_func(), SLOT(slotNksPinRequested()));
-        connect(dlg, SIGNAL(sigGPinRequested()), q_func(), SLOT(slotSigGPinRequested()));
-        connect(dlg, SIGNAL(rejected()), q_func(), SLOT(slotDialogRejected()));
-        connect(dlg, SIGNAL(accepted()), q_func(), SLOT(slotDialogAccepted()));
+        connect(dlg, &SetInitialPinDialog::nksPinRequested, q_func(), [this]() { slotNksPinRequested(); });
+        connect(dlg, &SetInitialPinDialog::sigGPinRequested, q_func(), [this]() { slotSigGPinRequested(); });
+        connect(dlg, &QDialog::rejected, q_func(), [this]() { slotDialogRejected(); });
+        connect(dlg, &QDialog::accepted, q_func(), [this]() { slotDialogAccepted(); });
 
         dialog = dlg;
     }
@@ -72,7 +72,7 @@ private:
     }
 
 private:
-    void setInitialPin(const char *pinRef, const char *resultSlot)
+    void setInitialPin(const char *pinRef, const ReaderStatus::TransactionFunc &resultSlot)
     {
         const auto nksCard = ReaderStatus::instance()->getCard<NetKeyCard>(serialNumber());
         if (!nksCard) {
@@ -86,12 +86,16 @@ private:
 
     void slotNksPinRequested()
     {
-        setInitialPin("PW1.CH", "setNksPinSettingResult");
+        setInitialPin("PW1.CH", [this](const GpgME::Error &error) {
+            dialog->setNksPinSettingResult(error);
+        });
     }
 
     void slotSigGPinRequested()
     {
-        setInitialPin("PW1.CH.SIG", "setSigGPinSettingResult");
+        setInitialPin("PW1.CH.SIG", [this](const GpgME::Error &error) {
+            dialog->setSigGPinSettingResult(error);
+        });
     }
 
     void slotDialogRejected()
@@ -140,7 +144,7 @@ SetInitialPinCommand::SetInitialPinCommand(const std::string &serialNumber)
 
 SetInitialPinCommand::~SetInitialPinCommand() {}
 
-QDialog *SetInitialPinCommand::dialog() const
+QDialog *SetInitialPinCommand::dialog()
 {
     d->ensureDialogCreated();
     return d->dialog;

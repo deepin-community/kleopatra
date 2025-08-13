@@ -12,16 +12,18 @@
 
 #include <KLocalizedString>
 
+#include <KLazyLocalizedString>
 
 struct about_data {
-    const char *name;
-    const char *desc;
+    const KLazyLocalizedString name;
+    const KLazyLocalizedString desc;
     const char *email;
     const char *web;
 };
 
 static const about_data authors[] = {
-    { I18N_NOOP("Steffen Hansen"), I18N_NOOP("Original Author"), "hansen@kde.org", nullptr },
+    {kli18n("Steffen Hansen"), kli18n("Original Author"), "hansen@kde.org",
+     nullptr},
 };
 
 AboutData::AboutData()
@@ -31,7 +33,8 @@ AboutData::AboutData()
 {
     using ::authors;
     //using ::credits;
-    for (unsigned int i = 0; i < sizeof authors / sizeof * authors; ++i)
-        addAuthor(i18n(authors[i].name), i18n(authors[i].desc),
+    for (unsigned int i = 0; i < sizeof authors / sizeof * authors; ++i) {
+        addAuthor(KLocalizedString(authors[i].name).toString(), KLocalizedString(authors[i].desc).toString(),
                   QLatin1String(authors[i].email), QLatin1String(authors[i].web));
+    }
 }

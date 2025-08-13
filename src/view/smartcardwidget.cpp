@@ -62,7 +62,14 @@ public:
                             QStringLiteral("<ul><li>") + supported.join(QLatin1String("</li><li>")) +
                             QStringLiteral("</li></ul>"), this));
         lay->addSpacing(10);
-        lay->addWidget(new QLabel(i18n("Refresh the view (F5) to update the smartcard status."), this));
+        {
+            auto hbox = new QHBoxLayout;
+            hbox->addStretch(1);
+            mReloadButton = new QPushButton{i18n("Reload"), this};
+            hbox->addWidget(mReloadButton);
+            hbox->addStretch(1);
+            lay->addLayout(hbox);
+        }
         lay->addStretch(-1);
 
         auto hLay = new QHBoxLayout(this);
@@ -70,12 +77,22 @@ public:
         hLay->addLayout(lay);
         hLay->addStretch(-1);
         lay->addStretch(-1);
+
+        connect(mReloadButton, &QPushButton::clicked, this, &PlaceHolderWidget::reload);
     }
+
+Q_SIGNALS:
+    void reload();
+
+private:
+    QPushButton *mReloadButton = nullptr;
 };
 } // namespace
 
 class SmartCardWidget::Private
 {
+    friend class ::Kleo::SmartCardWidget;
+
 public:
     Private(SmartCardWidget *qq);
 
@@ -113,6 +130,7 @@ SmartCardWidget::Private::Private(SmartCardWidget *qq)
 
     mStack->setCurrentWidget(mPlaceHolderWidget);
 
+    connect(mPlaceHolderWidget, &PlaceHolderWidget::reload, q, &SmartCardWidget::reload);
     connect(ReaderStatus::instance(), &ReaderStatus::cardAdded,
             q, [this] (const std::string &serialNumber, const std::string &appName) { cardAddedOrChanged(serialNumber, appName); });
     connect(ReaderStatus::instance(), &ReaderStatus::cardChanged,
@@ -192,6 +210,29 @@ SmartCardWidget::SmartCardWidget(QWidget *parent)
 }
 
 Kleo::SmartCardWidget::~SmartCardWidget() = default;
+
+QWidget *getFirstEnabledFocusWidget(QWidget *parent)
+{
+    for (auto w = parent->nextInFocusChain(); w != parent; w = w->nextInFocusChain()) {
+        if (w->isEnabled() && (w->focusPolicy() != Qt::NoFocus)) {
+            return w;
+        }
+    }
+    return nullptr;
+}
+
+void SmartCardWidget::focusFirstChild(Qt::FocusReason reason)
+{
+    if (d->mStack->currentWidget() == d->mPlaceHolderWidget) {
+        if (auto w = getFirstEnabledFocusWidget(d->mPlaceHolderWidget)) {
+            w->setFocus(reason);
+        }
+    } else if (auto cardWidget = d->mTabWidget->currentWidget()) {
+        if (auto w = getFirstEnabledFocusWidget(cardWidget)) {
+            w->setFocus(reason);
+        }
+    }
+}
 
 void SmartCardWidget::reload()
 {

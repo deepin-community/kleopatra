@@ -36,6 +36,7 @@
 #endif
 
 #include "kleopatra_debug.h"
+#include <kwidgetsaddons_version.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
@@ -51,7 +52,7 @@ class CertificateToPIVCardCommand::Private : public CardCommand::Private
     }
 public:
     explicit Private(CertificateToPIVCardCommand *qq, const std::string &slot, const std::string &serialno);
-    ~Private();
+    ~Private() override;
 
 private:
     void start();
@@ -138,13 +139,30 @@ void CertificateToPIVCardCommand::Private::start()
         "<p>Please confirm that you want to write the following certificate to the %1 slot of card %2:</p>"
         "<center>%3</center>",
         PIVCard::keyDisplayName(cardSlot), QString::fromStdString(serialNumber()), certificateInfo);
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    auto confirmButton = KStandardGuiItem::ok();
+#else
     auto confirmButton = KStandardGuiItem::yes();
+#endif
     confirmButton.setText(i18nc("@action:button", "Write certificate"));
     confirmButton.setToolTip(QString());
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    const auto choice = KMessageBox::questionTwoActions(
+#else
     const auto choice = KMessageBox::questionYesNo(
-        parentWidgetOrView(), message, i18nc("@title:window", "Write certificate to card"),
-        confirmButton, KStandardGuiItem::cancel(), QString(), KMessageBox::Notify | KMessageBox::WindowModal);
+#endif
+        parentWidgetOrView(),
+        message,
+        i18nc("@title:window", "Write certificate to card"),
+        confirmButton,
+        KStandardGuiItem::cancel(),
+        QString(),
+        KMessageBox::Notify | KMessageBox::WindowModal);
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    if (choice != KMessageBox::ButtonCode::PrimaryAction) {
+#else
     if (choice != KMessageBox::Yes) {
+#endif
         finished();
         return;
     }
@@ -161,8 +179,7 @@ void CertificateToPIVCardCommand::Private::startCertificateToPIVCard()
     Data data(&dp);
     const Error err = ctx->exportPublicKeys(certificate.primaryFingerprint(), data);
     if (err) {
-        error(i18nc("@info", "Exporting the certificate failed: %1", QString::fromUtf8(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Exporting the certificate failed: %1", QString::fromUtf8(err.asString())));
         finished();
         return;
     }
@@ -177,7 +194,14 @@ void CertificateToPIVCardCommand::Private::startCertificateToPIVCard()
 
     const QByteArray command = QByteArrayLiteral("SCD WRITECERT ") + QByteArray::fromStdString(cardSlot);
     auto transaction = std::unique_ptr<AssuanTransaction>(new WriteCertAssuanTransaction(certificateData));
-    ReaderStatus::mutableInstance()->startTransaction(pivCard, command, q_func(), "certificateToPIVCardDone", std::move(transaction));
+    ReaderStatus::mutableInstance()->startTransaction(
+        pivCard,
+        command,
+        q_func(),
+        [this](const GpgME::Error &err) {
+            q->certificateToPIVCardDone(err);
+        },
+        std::move(transaction));
 }
 
 void CertificateToPIVCardCommand::Private::authenticate()
@@ -230,12 +254,9 @@ void CertificateToPIVCardCommand::certificateToPIVCardDone(const Error &err)
         }
 #endif
 
-        d->error(i18nc("@info", "Writing the certificate to the card failed: %1", QString::fromUtf8(err.asString())),
-                 i18nc("@title", "Error"));
+        d->error(i18nc("@info", "Writing the certificate to the card failed: %1", QString::fromUtf8(err.asString())));
     } else if (!err.isCanceled()) {
-        KMessageBox::information(d->parentWidgetOrView(),
-                                 i18nc("@info", "Writing the certificate to the card succeeded."),
-                                 i18nc("@title", "Success"));
+        d->success(i18nc("@info", "Writing the certificate to the card succeeded."));
         ReaderStatus::mutableInstance()->updateStatus();
     }
 

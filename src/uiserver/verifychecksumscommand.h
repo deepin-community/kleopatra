@@ -23,7 +23,7 @@ class VerifyChecksumsCommand : public QObject, public AssuanCommandMixin<VerifyC
     Q_OBJECT
 public:
     VerifyChecksumsCommand();
-    ~VerifyChecksumsCommand();
+    ~VerifyChecksumsCommand() override;
 
     static const char *staticName()
     {
@@ -43,8 +43,6 @@ private Q_SLOTS:
 private:
     class Private;
     kdtools::pimpl_ptr<Private> d;
-    //Q_PRIVATE_SLOT( this, void done() )
-    //Q_PRIVATE_SLOT( this, void done(int,QString) )
 };
 
 }

@@ -20,6 +20,16 @@
 
 using namespace Kleo;
 using namespace GpgME;
+using namespace std::chrono_literals;
+
+static const auto initialRetryDelay = 125ms;
+static const auto maxRetryDelay = 1000ms;
+static const auto maxConnectionAttempts = 10;
+
+DeviceInfoWatcher::Worker::Worker()
+    : mRetryDelay{initialRetryDelay}
+{
+}
 
 DeviceInfoWatcher::Worker::~Worker()
 {
@@ -39,24 +49,32 @@ void DeviceInfoWatcher::Worker::start()
         }
     }
 
-    // try to connect to the agent for at most ~12.8 seconds with increasing delay between retries
-    static const int MaxRetryDelay = 100 * 64;
     static const char *command = "SCD DEVINFO --watch";
     std::unique_ptr<AssuanTransaction> t(new StatusConsumerAssuanTransaction(this));
     const Error err = mContext->startAssuanTransaction(command, std::move(t));
     if (!err) {
         qCDebug(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Assuan transaction for" << command << "started";
+        mRetryDelay = initialRetryDelay;
+        mFailedConnectionAttempts = 0;
         QMetaObject::invokeMethod(this, "poll", Qt::QueuedConnection);
         return;
     } else if (err.code() == GPG_ERR_ASS_CONNECT_FAILED) {
-        if (mRetryDelay <= MaxRetryDelay) {
-            qCInfo(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Connecting to the agent failed. Retrying in" << mRetryDelay << "ms";
-            QThread::msleep(mRetryDelay);
-            mRetryDelay *= 2;
+        mFailedConnectionAttempts++;
+        if (mFailedConnectionAttempts == 1) {
+            Q_EMIT startOfGpgAgentRequested();
+        }
+        if (mFailedConnectionAttempts < maxConnectionAttempts) {
+            qCInfo(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Connecting to the agent failed. Retrying in" << mRetryDelay.count() << "ms";
+            QThread::msleep(mRetryDelay.count());
+            mRetryDelay = std::min(mRetryDelay * 2, maxRetryDelay);
             QMetaObject::invokeMethod(this, "start", Qt::QueuedConnection);
             return;
         }
         qCWarning(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Connecting to the agent failed too often. Giving up.";
+    } else if (err.code() == GPG_ERR_EPIPE) {
+        qCDebug(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Assuan transaction failed with broken pipe. The agent seems to have died. Resetting context.";
+        mContext.reset();
+        QMetaObject::invokeMethod(this, "start", Qt::QueuedConnection);
     } else {
         qCWarning(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::start: Starting Assuan transaction for" << command << "failed:" << err;
     }
@@ -67,6 +85,7 @@ void DeviceInfoWatcher::Worker::poll()
     const bool finished = mContext->poll();
     if (finished) {
         qCDebug(KLEOPATRA_LOG) << "DeviceInfoWatcher::Worker::poll: context finished with" << mContext->lastError();
+        QThread::msleep(1000);
         QMetaObject::invokeMethod(this, "start", Qt::QueuedConnection);
     } else {
         QMetaObject::invokeMethod(this, "poll", Qt::QueuedConnection);
@@ -100,6 +119,8 @@ void DeviceInfoWatcher::Private::start()
     connect(&workerThread, &QThread::finished, worker, &QObject::deleteLater);
     connect(worker, &DeviceInfoWatcher::Worker::statusChanged,
             q, &DeviceInfoWatcher::statusChanged);
+    connect(worker, &DeviceInfoWatcher::Worker::startOfGpgAgentRequested,
+            q, &DeviceInfoWatcher::startOfGpgAgentRequested);
     workerThread.start();
 }
 

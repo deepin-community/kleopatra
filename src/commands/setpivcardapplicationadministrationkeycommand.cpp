@@ -39,7 +39,7 @@ class SetPIVCardApplicationAdministrationKeyCommand::Private : public CardComman
     }
 public:
     explicit Private(SetPIVCardApplicationAdministrationKeyCommand *qq, const std::string &serialNumber, QWidget *p);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -160,8 +160,8 @@ void SetPIVCardApplicationAdministrationKeyCommand::Private::ensureDialogCreated
                               "The key needs to consist of 24 bytes, i.e. 48 hex-characters.") :
                          i18n("Please enter the new PIV Card Application Administration Key again."));
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 void SetPIVCardApplicationAdministrationKeyCommand::Private::slotDialogAccepted()
@@ -175,8 +175,7 @@ void SetPIVCardApplicationAdministrationKeyCommand::Private::slotDialogAccepted(
 
     const QByteArray newAdminKey2 = dialog->adminKey();
     if (newAdminKey != newAdminKey2) {
-        error(i18nc("@info", "The two keys you have entered do not match. Please retry."),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "The two keys you have entered do not match. Please retry."));
         newAdminKey.clear();
         dialog = nullptr;
         setAdminKey();
@@ -192,7 +191,9 @@ void SetPIVCardApplicationAdministrationKeyCommand::Private::slotDialogAccepted(
 
     const QByteArray plusPercentEncodedAdminKey = newAdminKey.toPercentEncoding().replace(' ', '+');
     const QByteArray command = QByteArray("SCD SETATTR SET-ADM-KEY ") + plusPercentEncodedAdminKey;
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command, q, "slotResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command, q, [this](const GpgME::Error &err) {
+        slotResult(err);
+    });
 }
 
 void SetPIVCardApplicationAdministrationKeyCommand::Private::slotDialogRejected()
@@ -205,10 +206,9 @@ void SetPIVCardApplicationAdministrationKeyCommand::Private::slotResult(const Gp
     qCDebug(KLEOPATRA_LOG) << "SetPIVCardApplicationAdministrationKeyCommand::slotResult():"
                            << err.asString() << "(" << err.code() << ")";
     if (err) {
-        error(i18nc("@info", "Setting the PIV Card Application Administration Key failed: %1", QString::fromLatin1(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Setting the PIV Card Application Administration Key failed: %1", QString::fromLatin1(err.asString())));
     } else if (!err.isCanceled()) {
-        information(i18nc("@info", "PIV Card Application Administration Key set successfully."), i18nc("@title", "Success"));
+        success(i18nc("@info", "PIV Card Application Administration Key set successfully."));
         ReaderStatus::mutableInstance()->updateStatus();
     }
     finished();

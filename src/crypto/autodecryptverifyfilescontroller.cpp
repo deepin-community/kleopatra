@@ -35,6 +35,7 @@
 #include <KLocalizedString>
 #include <KMessageBox>
 #include "kleopatra_debug.h"
+#include <kwidgetsaddons_version.h>
 
 #include <QDir>
 #include <QFile>
@@ -43,6 +44,7 @@
 #include <QFileDialog>
 #include <QTemporaryDir>
 
+#include <gpgme++/decryptionresult.h>
 
 using namespace GpgME;
 using namespace Kleo;
@@ -54,14 +56,11 @@ class AutoDecryptVerifyFilesController::Private
     AutoDecryptVerifyFilesController *const q;
 public:
     explicit Private(AutoDecryptVerifyFilesController *qq);
-    ~Private() {
-        qCDebug(KLEOPATRA_LOG);
-        delete m_workDir;
-    }
 
     void slotDialogCanceled();
     void schedule();
 
+    QString getEmbeddedFileName(const QString &fileName) const;
     void exec();
     std::vector<std::shared_ptr<Task> > buildTasks(const QStringList &, QStringList &);
 
@@ -88,7 +87,7 @@ public:
     bool m_errorDetected = false;
     DecryptVerifyOperation m_operation = DecryptVerify;
     DecryptVerifyFilesDialog *m_dialog = nullptr;
-    QTemporaryDir *m_workDir = nullptr;
+    std::unique_ptr<QTemporaryDir> m_workDir;
 };
 
 AutoDecryptVerifyFilesController::Private::Private(AutoDecryptVerifyFilesController *qq) : q(qq)
@@ -114,6 +113,24 @@ void AutoDecryptVerifyFilesController::Private::schedule()
         for (const std::shared_ptr<const DecryptVerifyResult> &i : std::as_const(m_results)) {
             Q_EMIT q->verificationResult(i->verificationResult());
         }
+    }
+}
+
+QString AutoDecryptVerifyFilesController::Private::getEmbeddedFileName(const QString &fileName) const
+{
+    auto it = std::find_if(m_results.cbegin(), m_results.cend(), [fileName](const auto &r) {
+        return r->fileName() == fileName;
+    });
+    if (it != m_results.cend()) {
+        const auto embeddedFilePath = QString::fromUtf8((*it)->decryptionResult().fileName());
+        if (embeddedFilePath.contains(QLatin1Char{'\\'})) {
+            // ignore embedded file names containing '\'
+            return {};
+        }
+        // strip the path from the embedded file name
+        return QFileInfo{embeddedFilePath}.fileName();
+    } else {
+        return {};
     }
 }
 
@@ -187,24 +204,62 @@ void AutoDecryptVerifyFilesController::Private::exec()
                 }
                 continue;
             }
-            const auto outpath = outDir.absoluteFilePath(fi.fileName());
+
+            const auto embeddedFileName = getEmbeddedFileName(inpath);
+            QString outFileName = fi.fileName();
+            if (!embeddedFileName.isEmpty() && embeddedFileName != fi.fileName()) {
+                // we switch "Yes" and "No" because Yes is default, but saving with embedded file name could be dangerous
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+                const auto answer = KMessageBox::questionTwoActionsCancel(
+                    m_dialog,
+#else
+                const auto answer =
+                    KMessageBox::questionYesNoCancel(m_dialog,
+#endif
+                    xi18n("Shall the file be saved with the original file name <filename>%1</filename>?", embeddedFileName),
+                    i18n("Use Original File Name?"),
+                    KGuiItem(xi18n("No, Save As <filename>%1</filename>", fi.fileName())),
+                    KGuiItem(xi18n("Yes, Save As <filename>%1</filename>", embeddedFileName)));
+                if (answer == KMessageBox::Cancel) {
+                    qCDebug(KLEOPATRA_LOG) << "Saving canceled for:" << inpath;
+                    continue;
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+                } else if (answer == KMessageBox::ButtonCode::SecondaryAction) {
+#else
+                } else if (answer == KMessageBox::No) {
+#endif
+                    outFileName = embeddedFileName;
+                }
+            }
+            const auto outpath = outDir.absoluteFilePath(outFileName);
             qCDebug(KLEOPATRA_LOG) << "Moving " << inpath << " to " << outpath;
             const QFileInfo ofi(outpath);
             if (ofi.exists()) {
-                int sel = KMessageBox::No;
+                int sel = KMessageBox::Cancel;
                 if (!overWriteAll) {
-                    sel = KMessageBox::questionYesNoCancel(m_dialog, i18n("The file <b>%1</b> already exists.\n"
-                                                           "Overwrite?", outpath),
-                                                           i18n("Overwrite Existing File?"),
-                                                           KStandardGuiItem::overwrite(),
-                                                           KGuiItem(i18n("Overwrite All")),
-                                                           KStandardGuiItem::cancel());
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+                    sel = KMessageBox::questionTwoActionsCancel(m_dialog,
+                                                                i18n("The file <b>%1</b> already exists.\n"
+#else
+                    sel = KMessageBox::questionYesNoCancel(m_dialog,
+                                                           i18n("The file <b>%1</b> already exists.\n"
+#endif
+                                                                     "Overwrite?",
+                                                                     outpath),
+                                                                i18n("Overwrite Existing File?"),
+                                                                KStandardGuiItem::overwrite(),
+                                                                KGuiItem(i18n("Overwrite All")),
+                                                                KStandardGuiItem::cancel());
                 }
                 if (sel == KMessageBox::Cancel) {
                     qCDebug(KLEOPATRA_LOG) << "Overwriting canceled for: " << outpath;
                     continue;
                 }
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+                if (sel == KMessageBox::ButtonCode::SecondaryAction) { // Overwrite All
+#else
                 if (sel == KMessageBox::No) { //Overwrite All
+#endif
                     overWriteAll = true;
                 }
                 if (!QFile::remove(outpath)) {
@@ -238,7 +293,7 @@ QVector<AutoDecryptVerifyFilesController::Private::CryptoFile> AutoDecryptVerify
     for (const auto &file : files) {
         CryptoFile cFile;
         cFile.fileName = file;
-        cFile.baseName = file.left(file.length() - 4);
+        cFile.baseName = stripSuffix(file);
         cFile.classification = classify(file);
         cFile.protocol = findProtocol(cFile.classification);
 
@@ -339,9 +394,9 @@ std::vector< std::shared_ptr<Task> > AutoDecryptVerifyFilesController::Private::
         if (isDetachedSignature(cFile.classification)) {
             // Detached signature, try to find data or ask the user.
             QString signedDataFileName = cFile.baseName;
-            if (signedDataFileName.isEmpty()) {
-                signedDataFileName = QFileDialog::getOpenFileName(nullptr, xi18n("Select the file to verify with \"%1\"", fi.fileName()),
-                                                                  fi.dir().dirName());
+            if (!QFile::exists(signedDataFileName)) {
+                signedDataFileName = QFileDialog::getOpenFileName(nullptr, xi18n("Select the file to verify with the signature <filename>%1</filename>", fi.fileName()),
+                                                                  fi.path());
             }
             if (signedDataFileName.isEmpty()) {
                 qCDebug(KLEOPATRA_LOG) << "No signed data selected. Verify aborted.";
@@ -383,31 +438,34 @@ std::vector< std::shared_ptr<Task> > AutoDecryptVerifyFilesController::Private::
                 qCDebug(KLEOPATRA_LOG) << "Failed detection for: " << cFile.fileName << " adding to undetected.";
             }
         } else {
+            const FileOperationsPreferences fileOpSettings;
             // Any Message type so we have input and output.
             const auto input = Input::createFromFile(cFile.fileName);
-            const auto archiveDefinitions = ArchiveDefinition::getArchiveDefinitions();
 
-            const auto ad = q->pick_archive_definition(cFile.protocol, archiveDefinitions, cFile.fileName);
+            std::shared_ptr<ArchiveDefinition> ad;
+            if (fileOpSettings.autoExtractArchives()) {
+                const auto archiveDefinitions = ArchiveDefinition::getArchiveDefinitions();
+                ad = q->pick_archive_definition(cFile.protocol, archiveDefinitions, cFile.fileName);
+            }
 
-            if (FileOperationsPreferences().dontUseTmpDir()) {
+            if (fileOpSettings.dontUseTmpDir()) {
                 if (!m_workDir) {
-                    m_workDir = new QTemporaryDir(heuristicBaseDirectory(fileNames) + QStringLiteral("/kleopatra-XXXXXX"));
+                    m_workDir = std::make_unique<QTemporaryDir>(heuristicBaseDirectory(fileNames) + QStringLiteral("/kleopatra-XXXXXX"));
                 }
                 if (!m_workDir->isValid()) {
-                    qCDebug(KLEOPATRA_LOG) << m_workDir->path() << "not a valid temporary directory.";
-                    delete m_workDir;
-                    m_workDir = new QTemporaryDir();
+                    qCDebug(KLEOPATRA_LOG) << heuristicBaseDirectory(fileNames) << "not a valid temporary directory.";
+                    m_workDir.reset();
                 }
-            } else if (!m_workDir) {
-                m_workDir = new QTemporaryDir();
+            }
+            if (!m_workDir) {
+                m_workDir = std::make_unique<QTemporaryDir>();
             }
             qCDebug(KLEOPATRA_LOG) << "Using:" << m_workDir->path() << "as temporary directory.";
 
             const auto wd = QDir(m_workDir->path());
 
-            const auto output =
-                ad       ? ad->createOutputFromUnpackCommand(cFile.protocol, cFile.fileName, wd) :
-                /*else*/   Output::createFromFile(wd.absoluteFilePath(outputFileName(fi.fileName())), false);
+            const auto output = ad ? ad->createOutputFromUnpackCommand(cFile.protocol, cFile.fileName, wd)
+                                   : Output::createFromFile(wd.absoluteFilePath(outputFileName(fi.fileName())), false);
 
             // If this might be opaque CMS signature, then try that. We already handled
             // detached CMS signature above
@@ -520,3 +578,4 @@ void AutoDecryptVerifyFilesController::doTaskDone(const Task *task, const std::s
     QTimer::singleShot(0, this, SLOT(schedule()));
 }
 #include "moc_autodecryptverifyfilescontroller.cpp"
+

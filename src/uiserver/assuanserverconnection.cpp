@@ -24,10 +24,10 @@
 #include <utils/output.h>
 #include <Libkleo/GnuPG>
 #include <utils/detail_p.h>
-#include <utils/hex.h>
 #include <utils/log.h>
 #include <utils/kleo_assert.h>
 
+#include <Libkleo/Hex>
 #include <Libkleo/Stl_Util>
 #include <Libkleo/KleoException>
 #include <Libkleo/KeyCache>
@@ -35,7 +35,7 @@
 #include <gpgme++/data.h>
 #include <gpgme++/key.h>
 
-#include <kmime/kmime_header_parsing.h>
+#include <KMime/HeaderParsing>
 
 #include "kleopatra_debug.h"
 #include <KLocalizedString>
@@ -47,7 +47,7 @@
 #include <QPointer>
 #include <QFileInfo>
 #include <QStringList>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QWidget>
 #include <QCoreApplication>
 
@@ -226,7 +226,7 @@ class AssuanServerConnection::Private : public QObject
     AssuanServerConnection *const q;
 public:
     Private(assuan_fd_t fd_, const std::vector< std::shared_ptr<AssuanCommandFactory> > &factories_, AssuanServerConnection *qq);
-    ~Private();
+    ~Private() override;
 
 Q_SIGNALS:
     void startKeyManager();
@@ -356,13 +356,14 @@ private:
         AssuanServerConnection::Private &conn = *static_cast<AssuanServerConnection::Private *>(assuan_get_pointer(ctx_));
 
         const QString str = QString::fromUtf8(line);
-        QRegExp rx(QLatin1String("(\\d+)(?:\\s+(.*))?"));
-        if (!rx.exactMatch(str)) {
+        static const QRegularExpression rx(QRegularExpression::anchoredPattern(uR"((\d+)(?:\s+(.*))?)"));
+        const QRegularExpressionMatch match = rx.match(str);
+        if (!match.hasMatch()) {
             static const QString errorString = i18n("Parse error");
             return assuan_process_done_msg(ctx_, gpg_error(GPG_ERR_ASS_SYNTAX), errorString);
         }
         bool ok = false;
-        if (const qulonglong id = rx.cap(1).toULongLong(&ok)) {
+        if (const qulonglong id = match.captured(1).toULongLong(&ok)) {
             if (ok && id <= std::numeric_limits<unsigned int>::max()) {
                 SessionDataHandler::instance()->enterSession(id);
                 conn.sessionId = id;
@@ -371,8 +372,10 @@ private:
                 return assuan_process_done_msg(ctx_, gpg_error(GPG_ERR_ASS_SYNTAX), errorString);
             }
         }
-        if (!rx.cap(2).isEmpty()) {
-            conn.sessionTitle = rx.cap(2);
+
+        const QString cap2 = match.captured(2);
+        if (!cap2.isEmpty()) {
+            conn.sessionTitle = cap2;
         }
         qCDebug(KLEOPATRA_LOG) << "session_handler: "
                                << "id=" << static_cast<unsigned long>(conn.sessionId)
@@ -965,7 +968,7 @@ AssuanServerConnection::Private::Private(assuan_fd_t fd_, const std::vector< std
         throw Exception(err, "register \"FILE\" handler");
 
     // register user-defined commands:
-    Q_FOREACH (std::shared_ptr<AssuanCommandFactory> fac, factories)
+    for (std::shared_ptr<AssuanCommandFactory> fac : std::as_const(factories))
 #ifndef HAVE_ASSUAN2
         if (const gpg_error_t err = assuan_register_command(ctx.get(), fac->name(), fac->_handler()))
 #else

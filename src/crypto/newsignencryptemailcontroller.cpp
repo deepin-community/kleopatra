@@ -26,12 +26,13 @@
 #include <Libkleo/GnuPG>
 #include "utils/kleo_assert.h"
 
+#include <Libkleo/Compliance>
 #include <Libkleo/Stl_Util>
 #include <Libkleo/KleoException>
 
 #include <gpgme++/key.h>
 
-#include <kmime/kmime_header_parsing.h>
+#include <KMime/HeaderParsing>
 
 #include <KLocalizedString>
 
@@ -172,7 +173,7 @@ static bool is_de_vs_compliant(bool sign, bool encrypt, const std::vector<Sender
     if (sign) {
         for (const auto &sender: senders) {
             const auto &key = sender.resolvedSigningKey(presetProtocol);
-            if (!IS_DE_VS(key) || keyValidity(key) < GpgME::UserID::Validity::Full) {
+            if (!key.isDeVs() || keyValidity(key) < GpgME::UserID::Validity::Full) {
                 return false;
             }
         }
@@ -181,14 +182,14 @@ static bool is_de_vs_compliant(bool sign, bool encrypt, const std::vector<Sender
     if (encrypt) {
         for (const auto &sender: senders) {
             const auto &key = sender.resolvedSigningKey(presetProtocol);
-            if (!IS_DE_VS(key) || keyValidity(key) < GpgME::UserID::Validity::Full) {
+            if (!key.isDeVs() || keyValidity(key) < GpgME::UserID::Validity::Full) {
                 return false;
             }
         }
 
         for (const auto &recipient: recipients) {
             const auto &key = recipient.resolvedEncryptionKey(presetProtocol);
-            if (!IS_DE_VS(key) || keyValidity(key) < GpgME::UserID::Validity::Full) {
+            if (!key.isDeVs() || keyValidity(key) < GpgME::UserID::Validity::Full) {
                 return false;
             }
         }
@@ -393,11 +394,12 @@ void NewSignEncryptEMailController::startResolveCertificates(const std::vector<M
     d->dialog->pickProtocol();
     d->dialog->setConflict(conflict);
 
-    const bool compliant = !Kleo::gpgComplianceP("de-vs") || is_de_vs_compliant(d->sign,
+    const bool compliant = !DeVSCompliance::isActive() ||
+                           (DeVSCompliance::isCompliant() && is_de_vs_compliant(d->sign,
                                                                                 d->encrypt,
                                                                                 senders,
                                                                                 recipients,
-                                                                                d->presetProtocol);
+                                                                                d->presetProtocol));
 
     if (quickMode && !conflict && compliant) {
         QMetaObject::invokeMethod(this, "slotDialogAccepted", Qt::QueuedConnection);
@@ -569,11 +571,11 @@ void NewSignEncryptEMailController::doTaskDone(const Task *task, const std::shar
     if (result && result->hasError()) {
         QPointer<QObject> that = this;
         if (result->details().isEmpty())
-            KMessageBox::        sorry(nullptr,
+            KMessageBox::error(nullptr,
                                        result->overview(),
                                        i18nc("@title:window", "Error"));
         else
-            KMessageBox::detailedSorry(nullptr,
+            KMessageBox::detailedError(nullptr,
                                        result->overview(),
                                        result->details(),
                                        i18nc("@title:window", "Error"));

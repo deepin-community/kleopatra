@@ -15,6 +15,7 @@
 
 #include "conf/groupsconfigdialog.h"
 
+#include <Libkleo/Algorithm>
 #include <view/keytreeview.h>
 #include <view/searchbar.h>
 #include <view/tabwidget.h>
@@ -27,7 +28,7 @@
 
 #include <commands/reloadkeyscommand.h>
 #include <commands/lookupcertificatescommand.h>
-#include <commands/newcertificatecommand.h>
+#include <commands/newopenpgpcertificatecommand.h>
 #include <commands/importcertificatefromfilecommand.h>
 
 #include <gpgme++/key.h>
@@ -42,15 +43,9 @@
 #include <QDialogButtonBox>
 #include <QItemSelectionModel>
 #include <QAbstractItemView>
-#include <QPointer>
 #include <QVBoxLayout>
 
 #include <algorithm>
-
-#include <gpgme++/gpgmepp_version.h>
-#if GPGMEPP_VERSION >= 0x10E00 // 1.14.0
-# define GPGME_HAS_REMARKS
-#endif
 
 using namespace Kleo;
 using namespace Kleo::Dialogs;
@@ -65,6 +60,21 @@ CertificateSelectionDialog::Option CertificateSelectionDialog::optionsFromProtoc
     case CMS:     return CertificateSelectionDialog::CMSFormat;
     default:      return CertificateSelectionDialog::AnyFormat;
     }
+}
+
+namespace
+{
+auto protocolFromOptions(CertificateSelectionDialog::Options options)
+{
+    switch (options & CertificateSelectionDialog::AnyFormat) {
+    case CertificateSelectionDialog::OpenPGPFormat:
+        return GpgME::OpenPGP;
+    case CertificateSelectionDialog::CMSFormat:
+        return GpgME::CMS;
+    default:
+        return GpgME::UnknownProtocol;
+    }
+}
 }
 
 class CertificateSelectionDialog::Private
@@ -83,17 +93,15 @@ private:
     }
     void create()
     {
-        auto cmd = new NewCertificateCommand(nullptr);
+        auto cmd = new NewOpenPGPCertificateCommand;
         cmd->setParentWidget(q);
-        if ((options & AnyFormat) != AnyFormat) {
-            cmd->setProtocol((options & OpenPGPFormat) ? OpenPGP : CMS);
-        }
         cmd->start();
     }
     void lookup()
     {
-        Command *const cmd = new LookupCertificatesCommand(nullptr);
+        const auto cmd = new LookupCertificatesCommand(nullptr);
         cmd->setParentWidget(q);
+        cmd->setProtocol(protocolFromOptions(options));
         cmd->start();
     }
     void manageGroups()
@@ -126,7 +134,7 @@ private:
     }
 
 private:
-    QSet<QAbstractItemView *> connectedViews;
+    std::vector<QAbstractItemView *> connectedViews;
     QString customLabelText;
     Options options = AnyCertificate | AnyFormat;
 
@@ -135,6 +143,7 @@ private:
         SearchBar searchBar;
         TabWidget tabWidget;
         QDialogButtonBox buttonBox;
+        QPushButton *createButton = nullptr;
     } ui;
 
     void setUpUI(CertificateSelectionDialog *q)
@@ -154,23 +163,26 @@ private:
         okButton->setEnabled(false);
         ui.buttonBox.addButton(QDialogButtonBox::Close);
         QPushButton *const reloadButton = ui.buttonBox.addButton(i18n("Reload"), QDialogButtonBox::ActionRole);
-        QPushButton *const importButton = ui.buttonBox.addButton(i18n("Import..."), QDialogButtonBox::ActionRole);
-        QPushButton *const lookupButton = ui.buttonBox.addButton(i18n("Lookup..."), QDialogButtonBox::ActionRole);
-        QPushButton *const createButton = ui.buttonBox.addButton(i18n("New..."), QDialogButtonBox::ActionRole);
-        QPushButton *const groupsButton = ui.buttonBox.addButton(i18n("Groups..."), QDialogButtonBox::ActionRole);
-        groupsButton->setVisible(Settings().groupsEnabled());
-
-        importButton->setToolTip(i18nc("@info:tooltip", "Import certificate from file"));
-        lookupButton->setToolTip(i18nc("@info:tooltip", "Lookup certificates on server"));
         reloadButton->setToolTip(i18nc("@info:tooltip", "Refresh certificate list"));
-        createButton->setToolTip(i18nc("@info:tooltip", "Create a new certificate"));
+        QPushButton *const importButton = ui.buttonBox.addButton(i18n("Import..."), QDialogButtonBox::ActionRole);
+        importButton->setToolTip(i18nc("@info:tooltip", "Import certificate from file"));
+        importButton->setAccessibleName(i18n("Import certificate"));
+        QPushButton *const lookupButton = ui.buttonBox.addButton(i18n("Lookup..."), QDialogButtonBox::ActionRole);
+        lookupButton->setToolTip(i18nc("@info:tooltip", "Look up certificate on server"));
+        lookupButton->setAccessibleName(i18n("Look up certificate"));
+        ui.createButton = ui.buttonBox.addButton(i18n("New..."), QDialogButtonBox::ActionRole);
+        ui.createButton->setToolTip(i18nc("@info:tooltip", "Create a new OpenPGP certificate"));
+        ui.createButton->setAccessibleName(i18n("Create certificate"));
+        QPushButton *const groupsButton = ui.buttonBox.addButton(i18n("Groups..."), QDialogButtonBox::ActionRole);
         groupsButton->setToolTip(i18nc("@info:tooltip", "Manage certificate groups"));
+        groupsButton->setAccessibleName(i18n("Manage groups"));
+        groupsButton->setVisible(Settings().groupsEnabled());
 
         connect(&ui.buttonBox, &QDialogButtonBox::accepted, q, &CertificateSelectionDialog::accept);
         connect(&ui.buttonBox, &QDialogButtonBox::rejected, q, &CertificateSelectionDialog::reject);
         connect(reloadButton, &QPushButton::clicked, q, [this] () { reload(); });
         connect(lookupButton, &QPushButton::clicked, q, [this] () { lookup(); });
-        connect(createButton, &QPushButton::clicked, q, [this] () { create(); });
+        connect(ui.createButton, &QPushButton::clicked, q, [this] () { create(); });
         connect(groupsButton, &QPushButton::clicked, q, [this] () { manageGroups(); });
         connect(KeyCache::instance().get(), &KeyCache::keysMayHaveChanged,
                 q, [this] () { slotKeysMayHaveChanged(); });
@@ -194,11 +206,9 @@ CertificateSelectionDialog::Private::Private(CertificateSelectionDialog *qq)
     setUpUI(q);
     ui.tabWidget.setFlatModel(AbstractKeyListModel::createFlatKeyListModel(q));
     ui.tabWidget.setHierarchicalModel(AbstractKeyListModel::createHierarchicalKeyListModel(q));
-#ifdef GPGME_HAS_REMARKS
     const auto tagKeys = Tags::tagKeys();
     ui.tabWidget.flatModel()->setRemarkKeys(tagKeys);
     ui.tabWidget.hierarchicalModel()->setRemarkKeys(tagKeys);
-#endif
     ui.tabWidget.connectSearchBar(&ui.searchBar);
 
     connect(&ui.tabWidget, &TabWidget::currentViewChanged,
@@ -246,6 +256,8 @@ void CertificateSelectionDialog::setOptions(Options options)
     d->ui.tabWidget.setMultiSelection(options & MultiSelection);
 
     d->slotKeysMayHaveChanged();
+    d->updateLabelText();
+    d->ui.createButton->setVisible(options & OpenPGPFormat);
 }
 
 CertificateSelectionDialog::Options CertificateSelectionDialog::options() const
@@ -432,8 +444,8 @@ void CertificateSelectionDialog::filterAllowedKeys(std::vector<Key> &keys, int o
 
 void CertificateSelectionDialog::Private::slotCurrentViewChanged(QAbstractItemView *newView)
 {
-    if (!connectedViews.contains(newView)) {
-        connectedViews.insert(newView);
+    if (!Kleo::contains(connectedViews, newView)) {
+        connectedViews.push_back(newView);
         connect(newView, &QAbstractItemView::doubleClicked,
                 q, [this] (const QModelIndex &index) { slotDoubleClicked(index); });
         Q_ASSERT(newView->selectionModel());

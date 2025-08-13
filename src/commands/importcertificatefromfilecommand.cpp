@@ -12,10 +12,7 @@
 #include "importcertificatefromfilecommand.h"
 #include "importcertificatescommand_p.h"
 
-#include "utils/filedialog.h"
-
 #include <QGpgME/Protocol>
-#include <QGpgME/ImportJob>
 
 #include <Libkleo/Classify>
 
@@ -26,6 +23,7 @@
 #include <KConfigGroup>
 
 #include <QFile>
+#include <QFileDialog>
 #include <QString>
 #include <QWidget>
 #include <QFileInfo>
@@ -48,7 +46,7 @@ class ImportCertificateFromFileCommand::Private : public ImportCertificatesComma
     }
 public:
     explicit Private(ImportCertificateFromFileCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     bool ensureHaveFile();
 
@@ -122,36 +120,38 @@ void ImportCertificateFromFileCommand::doStart()
         return;
     }
 
+    d->setProgressWindowTitle(i18nc("@title:window", "Importing Certificates"));
+    d->setProgressLabelText(i18np("Importing certificates from 1 file...",
+                                  "Importing certificates from %1 files...",
+                                  d->files.size()));
+
     //TODO: use KIO here
     d->setWaitForMoreJobs(true);
     for (const QString &fn : std::as_const(d->files)) {
         QFile in(fn);
         if (!in.open(QIODevice::ReadOnly)) {
             d->error(i18n("Could not open file %1 for reading: %2", in.fileName(), in.errorString()), i18n("Certificate Import Failed"));
-            d->importResult(ImportResult(), fn);
+            d->importResult({fn, GpgME::UnknownProtocol, ImportType::Local, ImportResult{}});
             continue;
         }
-        const GpgME::Protocol protocol = findProtocol(fn);
-        if (protocol == GpgME::UnknownProtocol) {   //TODO: might use exceptions here
-            d->error(i18n("Could not determine certificate type of %1.", in.fileName()), i18n("Certificate Import Failed"));
-            d->importResult(ImportResult(), fn);
-            continue;
-        }
-        d->startImport(protocol, in.readAll(), fn);
+        const auto data = in.readAll();
+        d->startImport(GpgME::OpenPGP, data, fn);
+        d->startImport(GpgME::CMS, data, fn);
+        d->importGroupsFromFile(fn);
     }
     d->setWaitForMoreJobs(false);
 }
 
 static QStringList get_file_name(QWidget *parent)
 {
-    const QString certificateFilter = i18n("Certificates") + QLatin1String(" (*.asc *.cer *.cert *.crt *.der *.pem *.gpg *.p7c *.p12 *.pfx *.pgp)");
+    const QString certificateFilter = i18n("Certificates") + QLatin1String(" (*.asc *.cer *.cert *.crt *.der *.pem *.gpg *.p7c *.p12 *.pfx *.pgp *.kgrp)");
     const QString anyFilesFilter = i18n("Any files") + QLatin1String(" (*)");
     QString previousDir;
     if (const KSharedConfig::Ptr config = KSharedConfig::openConfig()) {
         const KConfigGroup group(config, "Import Certificate");
         previousDir = group.readPathEntry("last-open-file-directory", QDir::homePath());
     }
-    const QStringList files = Kleo::FileDialog::getOpenFileNames(parent, i18n("Select Certificate File"), previousDir, certificateFilter + QLatin1String(";;") + anyFilesFilter);
+    const QStringList files = QFileDialog::getOpenFileNames(parent, i18n("Select Certificate File"), previousDir, certificateFilter + QLatin1String(";;") + anyFilesFilter);
     if (!files.empty())
         if (const KSharedConfig::Ptr config = KSharedConfig::openConfig()) {
             KConfigGroup group(config, "Import Certificate");

@@ -9,6 +9,8 @@
 
 #include "gencardkeydialog.h"
 
+#include "smartcard/algorithminfo.h"
+#include "utils/qt-cxx20-compat.h"
 #include "utils/userinfo.h"
 
 #include <QDialogButtonBox>
@@ -47,6 +49,9 @@ public:
         if (requiredAttributes & KeyOwnerName) {
             auto nameLabel = new QLabel(i18n("Name:"));
             mNameEdit = new QLineEdit(userFullName());
+            connect(mNameEdit, &QLineEdit::textChanged, q, [this]() {
+                checkAcceptable();
+            });
 
             grid->addWidget(nameLabel, row, 0);
             grid->addWidget(mNameEdit, row++, 1);
@@ -113,7 +118,7 @@ public:
         q->accept();
     }
 
-    void setSupportedAlgorithms(const std::vector<std::pair<std::string, QString>> &algorithms, const std::string &defaultAlgo)
+    void setSupportedAlgorithms(const std::vector<SmartCard::AlgorithmInfo> &algorithms, const std::string &defaultAlgo)
     {
         if (!mAlgorithmCombo) {
             qCWarning(KLEOPATRA_LOG) << "GenCardKeyDialog::setSupportedAlgorithms() called, but algorithm no required key attribute";
@@ -121,31 +126,24 @@ public:
         }
 
         mAlgorithmCombo->clear();
-        for (auto algorithm: algorithms) {
-            mAlgorithmCombo->addItem(algorithm.second, QByteArray::fromStdString(algorithm.first));
+        for (const auto &algorithm: algorithms) {
+            mAlgorithmCombo->addItem(algorithm.displayName, QByteArray::fromStdString(algorithm.id));
         }
         mAlgorithmCombo->setCurrentIndex(mAlgorithmCombo->findData(QByteArray::fromStdString(defaultAlgo)));
     }
 
     void checkAcceptable()
     {
-        // We only require a valid mail address
         if (!mEmailEdit) {
+            // email is not required
             return;
         }
         const QString mail = mEmailEdit->text();
-        if (!mail.isEmpty() &&
-            KEmailAddress::isValidSimpleAddress(mail)) {
-            mOkButton->setEnabled(true);
-            mInvalidEmailLabel->hide();
-            return;
-        }
-        if (!mail.isEmpty()) {
-            mInvalidEmailLabel->show();
-        } else {
-            mInvalidEmailLabel->hide();
-        }
-        mOkButton->setEnabled(false);
+        const bool mailIsValid = !mail.isEmpty() && KEmailAddress::isValidSimpleAddress(mail);
+        mInvalidEmailLabel->setVisible(!mail.isEmpty() && !mailIsValid);
+
+        const bool nameIsValid = mNameEdit && !mNameEdit->text().isEmpty();
+        mOkButton->setEnabled(mailIsValid || nameIsValid);
     }
 
     GenCardKeyDialog *const q;
@@ -163,7 +161,7 @@ GenCardKeyDialog::GenCardKeyDialog(KeyAttributes requiredAttributes, QWidget *pa
 {
 }
 
-void GenCardKeyDialog::setSupportedAlgorithms(const std::vector<std::pair<std::string, QString>> &algorithms, const std::string &defaultAlgo)
+void GenCardKeyDialog::setSupportedAlgorithms(const std::vector<SmartCard::AlgorithmInfo> &algorithms, const std::string &defaultAlgo)
 {
     d->setSupportedAlgorithms(algorithms, defaultAlgo);
 }

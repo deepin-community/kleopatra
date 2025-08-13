@@ -29,8 +29,8 @@ class DetailsCommand::Private : public Command::Private
         return static_cast<DetailsCommand *>(q);
     }
 public:
-    explicit Private(DetailsCommand *qq, KeyListController *c);
-    ~Private();
+    explicit Private(DetailsCommand *qq, KeyListController *c = nullptr);
+    ~Private() override;
 
 private:
     void ensureDialogCreated()
@@ -87,16 +87,9 @@ DetailsCommand::Private::Private(DetailsCommand *qq, KeyListController *c)
     : Command::Private(qq, c),
       dialog()
 {
-
 }
 
-DetailsCommand::Private::~Private() {}
-
-DetailsCommand::DetailsCommand(KeyListController *p)
-    : Command(new Private(this, p))
-{
-    d->init();
-}
+DetailsCommand::Private::~Private() = default;
 
 DetailsCommand::DetailsCommand(QAbstractItemView *v, KeyListController *p)
     : Command(v, new Private(this, p))
@@ -104,23 +97,15 @@ DetailsCommand::DetailsCommand(QAbstractItemView *v, KeyListController *p)
     d->init();
 }
 
-DetailsCommand::DetailsCommand(const Key &key, KeyListController *p)
-    : Command(new Private(this, p))
+DetailsCommand::DetailsCommand(const Key &key)
+    : Command{new Private{this}}
 {
     Q_ASSERT(!key.isNull());
     d->init();
     setKey(key);
 }
 
-DetailsCommand::DetailsCommand(const Key &key, QAbstractItemView *v, KeyListController *p)
-    : Command(v, new Private(this, p))
-{
-    Q_ASSERT(!key.isNull());
-    d->init();
-    setKey(key);
-}
-
-DetailsCommand::~DetailsCommand() {}
+DetailsCommand::~DetailsCommand() = default;
 
 void DetailsCommand::doStart()
 {

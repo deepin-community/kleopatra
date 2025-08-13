@@ -25,7 +25,6 @@
 
 #include <Libkleo/Stl_Util>
 
-#include <kmime/kmime_header_parsing.h>
 
 #include <KLocalizedString>
 
@@ -240,7 +239,7 @@ void SignEMailController::Private::schedule()
     if (!cms && !openpgp) {
         kleo_assert(runnable.empty());
         QPointer<QObject> Q = q;
-        Q_FOREACH (const std::shared_ptr<SignEMailTask> t, completed) {
+        for (const std::shared_ptr<SignEMailTask> &t : completed) {
             Q_EMIT q->reportMicAlg(t->micAlg());
             if (!Q) {
                 return;

@@ -83,6 +83,7 @@ private:
 
             logTextWidget.setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
             logTextWidget.setReadOnly(true);
+            logTextWidget.setWordWrapMode(QTextOption::NoWrap);
 
             vlay.addWidget(&logTextWidget, 1);
             vlay.addLayout(&hlay);
@@ -120,7 +121,7 @@ class DumpCertificateCommand::Private : Command::Private
     }
 public:
     explicit Private(DumpCertificateCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
     QString errorString() const
     {
@@ -227,12 +228,15 @@ DumpCertificateCommand::DumpCertificateCommand(const GpgME::Key &k)
 
 void DumpCertificateCommand::Private::init()
 {
-    connect(&process, SIGNAL(finished(int,QProcess::ExitStatus)),
-            q, SLOT(slotProcessFinished(int,QProcess::ExitStatus)));
-    connect(&process, SIGNAL(readyReadStandardError()),
-            q, SLOT(slotProcessReadyReadStandardError()));
-    connect(&process, SIGNAL(readyReadStandardOutput()),
-            q, SLOT(slotProcessReadyReadStandardOutput()));
+#if QT_DEPRECATED_SINCE(5, 13)
+    connect(&process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+#else
+    connect(&process, &QProcess::finished,
+#endif
+            q, [this](int exitCode, QProcess::ExitStatus status) { slotProcessFinished(exitCode, status); });
+    connect(&process, &QProcess::readyReadStandardError, q, [this]() { slotProcessReadyReadStandardError(); });
+    connect(&process, &QProcess::readyReadStandardOutput, q, [this] { slotProcessReadyReadStandardOutput(); });
+
     if (!key().isNull()) {
         process << gpgSmPath() << QStringLiteral("--dump-cert") << QLatin1String(key().primaryFingerprint());
     }
@@ -266,13 +270,12 @@ void DumpCertificateCommand::doStart()
 
     if (d->useDialog) {
         d->dialog = new DumpCertificateDialog;
+        d->applyWindowID(d->dialog);
         d->dialog->setAttribute(Qt::WA_DeleteOnClose);
         d->dialog->setWindowTitle(i18nc("@title:window", "Certificate Dump"));
 
-        connect(d->dialog, SIGNAL(updateRequested()),
-                this, SLOT(slotUpdateRequested()));
-        connect(d->dialog, SIGNAL(destroyed()),
-                this, SLOT(slotDialogDestroyed()));
+        connect(d->dialog, &DumpCertificateDialog::updateRequested, this, [this]() { d->slotUpdateRequested(); });
+        connect(d->dialog, &QObject::destroyed, this, [this]() { d->slotDialogDestroyed(); });
     }
 
     d->refreshView();

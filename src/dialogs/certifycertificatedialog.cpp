@@ -27,7 +27,9 @@
 
 #include <QVBoxLayout>
 #include <QDialogButtonBox>
+#include <QKeyEvent>
 #include <QPushButton>
+#include <QToolTip>
 
 #include <gpg-error.h>
 
@@ -63,18 +65,16 @@ CertifyCertificateDialog::CertifyCertificateDialog(QWidget *p, Qt::WindowFlags f
     });
 
     KConfigGroup cfgGroup(KSharedConfig::openStateConfig(), "CertifyDialog");
-    const QByteArray geom = cfgGroup.readEntry("geometry", QByteArray());
-    if (!geom.isEmpty()) {
-        restoreGeometry(geom);
-        return;
+    const auto size = cfgGroup.readEntry("Size", QSize{640, 480});
+    if (size.isValid()) {
+        resize(size);
     }
-    resize(QSize(640, 480));
 }
 
 CertifyCertificateDialog::~CertifyCertificateDialog()
 {
     KConfigGroup cfgGroup(KSharedConfig::openStateConfig(), "CertifyDialog");
-    cfgGroup.writeEntry("geometry", saveGeometry());
+    cfgGroup.writeEntry("Size", size());
     cfgGroup.sync();
 }
 
@@ -128,7 +128,7 @@ void CertifyCertificateDialog::setSelectedUserIDs(const std::vector<UserID> &uid
     mCertWidget->selectUserIDs(uids);
 }
 
-std::vector<unsigned int> CertifyCertificateDialog::selectedUserIDs() const
+std::vector<GpgME::UserID> CertifyCertificateDialog::selectedUserIDs() const
 {
     return mCertWidget->selectedUserIDs();
 }
@@ -158,4 +158,15 @@ void CertifyCertificateDialog::accept()
     conf.writeEntry("PublishCheckState", mCertWidget->publishSelected());
 
     QDialog::accept();
+}
+
+void CertifyCertificateDialog::keyPressEvent(QKeyEvent *e)
+{
+    // if Escape is pressed while a tool tip is shown, then close the tool tip but not the dialog
+    if (e->matches(QKeySequence::Cancel) && QToolTip::isVisible()) {
+        QToolTip::hideText();
+        return;
+    }
+
+    QDialog::keyPressEvent(e);
 }

@@ -40,6 +40,7 @@
 #endif
 
 #include <cerrno>
+#include <kwidgetsaddons_version.h>
 
 using namespace Kleo;
 using namespace Kleo::_detail;
@@ -82,10 +83,7 @@ namespace
 class TemporaryFile : public QTemporaryFile
 {
 public:
-    explicit TemporaryFile() : QTemporaryFile() {}
-    explicit TemporaryFile(const QString &templateName) : QTemporaryFile(templateName) {}
-    explicit TemporaryFile(QObject *parent) : QTemporaryFile(parent) {}
-    explicit TemporaryFile(const QString &templateName, QObject *parent) : QTemporaryFile(templateName, parent) {}
+    using QTemporaryFile::QTemporaryFile;
 
     void close() override {
         if (isOpen())
@@ -368,7 +366,7 @@ class FileOutput : public OutputImplBase
 {
 public:
     explicit FileOutput(const QString &fileName, const std::shared_ptr<OverwritePolicy> &policy);
-    ~FileOutput()
+    ~FileOutput() override
     {
         qCDebug(KLEOPATRA_LOG) << this;
     }
@@ -385,7 +383,7 @@ public:
     void doCancel() override {
         qCDebug(KLEOPATRA_LOG) << this;
     }
-    QString fileName() const
+    QString fileName() const override
     {
         return m_fileName;
     }
@@ -526,16 +524,31 @@ bool FileOutput::obtainOverwritePermission()
     if (m_policy->policy() != OverwritePolicy::Ask) {
         return m_policy->policy() == OverwritePolicy::Allow;
     }
-    const int sel = KMessageBox::questionYesNoCancel(m_policy->parentWidget(), i18n("The file <b>%1</b> already exists.\n"
-                    "Overwrite?", m_fileName),
-                    i18n("Overwrite Existing File?"),
-                    KStandardGuiItem::overwrite(),
-                    KGuiItem(i18n("Overwrite All")),
-                    KStandardGuiItem::cancel());
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    const int sel = KMessageBox::questionTwoActionsCancel(m_policy->parentWidget(),
+                                                          i18n("The file <b>%1</b> already exists.\n"
+#else
+    const int sel = KMessageBox::questionYesNoCancel(m_policy->parentWidget(),
+                                                     i18n("The file <b>%1</b> already exists.\n"
+#endif
+                                                               "Overwrite?",
+                                                               m_fileName),
+                                                          i18n("Overwrite Existing File?"),
+                                                          KStandardGuiItem::overwrite(),
+                                                          KGuiItem(i18n("Overwrite All")),
+                                                          KStandardGuiItem::cancel());
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    if (sel == KMessageBox::ButtonCode::SecondaryAction) { // Overwrite All
+#else
     if (sel == KMessageBox::No) { //Overwrite All
+#endif
         m_policy->setPolicy(OverwritePolicy::Allow);
     }
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+    return sel == KMessageBox::ButtonCode::PrimaryAction || sel == KMessageBox::ButtonCode::SecondaryAction;
+#else
     return sel == KMessageBox::Yes || sel == KMessageBox::No;
+#endif
 }
 
 void FileOutput::doFinalize()
@@ -574,8 +587,8 @@ void FileOutput::doFinalize()
          * rename and remove. So if we can't find our temporary file we try
          * to workaround that bug. */
         qCDebug(KLEOPATRA_LOG) << "failure to find " << tmpFileName;
-        if (tmpFileName.startsWith(QStringLiteral("UNC"))) {
-            tmpFileName.replace(QRegExp(QStringLiteral("^UNC")), QStringLiteral("/"));
+        if (tmpFileName.startsWith(QLatin1String("UNC"))) {
+            tmpFileName.replace(0, strlen("UNC"), QLatin1Char('/'));
             qtbug83365_workaround = true;
         }
         const QFileInfo fi2(tmpFileName);

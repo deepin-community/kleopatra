@@ -15,6 +15,7 @@
 #include <windows.h>
 
 #include <QDir>
+#include <QRegularExpression>
 
 /* This is the amount of data GPGME reads at once */
 #define PIPEBUF_SIZE 16384
@@ -291,7 +292,7 @@ static QString qt_create_commandline(const QString &program, const QStringList &
     for (int i=0; i<arguments.size(); ++i) {
         QString tmp = arguments.at(i);
         // Quotes are escaped and their preceding backslashes are doubled.
-        tmp.replace(QRegExp(QLatin1String("(\\\\*)\"")), QLatin1String("\\1\\1\\\""));
+        tmp.replace(QRegularExpression(QLatin1String(R"--((\\*)")--")), QLatin1String(R"--(\1\1\")--"));
         if (tmp.isEmpty() || tmp.contains(QLatin1Char(' ')) || tmp.contains(QLatin1Char('\t'))) {
             // The argument must not end with a \ since this would be interpreted
             // as escaping the quote -- rather put the \ behind the quote: e.g.
@@ -365,18 +366,71 @@ bool WindowsProcessDevice::Private::start(QIODevice::OpenMode mode)
     const QString nativeWorkingDirectory = QDir::toNativeSeparators(mWorkingDirectory);
     const wchar_t *wd = reinterpret_cast<const wchar_t *>(nativeWorkingDirectory.utf16());
 
-    qCDebug(KLEOPATRA_LOG) << "Spawning:" << args;
+    /* Filter out the handles to inherit only the three handles which we want to
+     * inherit. As a Qt Application we have a multitude of open handles which
+     * may or may not be inheritable. Testing has shown that this reduced about
+     * thirty handles. Open File handles in our child application can also cause the
+     * read pipe not to be closed correcly on exit. */
+    SIZE_T size;
+    bool suc = InitializeProcThreadAttributeList(NULL, 1, 0, &size) ||
+                         GetLastError() == ERROR_INSUFFICIENT_BUFFER;
+    if (!suc) {
+        qCDebug(KLEOPATRA_LOG) << "Failed to get Attribute List size";
+        mError = getLastErrorString();
+        return false;
+    }
+    LPPROC_THREAD_ATTRIBUTE_LIST attributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST> (HeapAlloc(GetProcessHeap(), 0, size));
+    if (!attributeList) {
+        qCDebug(KLEOPATRA_LOG) << "Failed to Allocate Attribute List";
+        return false;
+    }
+    suc = InitializeProcThreadAttributeList(attributeList, 1, 0, &size);
+    if (!suc) {
+        qCDebug(KLEOPATRA_LOG) << "Failed to Initalize Attribute List";
+        mError = getLastErrorString();
+        return false;
+    }
+
+    HANDLE handles[3];
+    handles[0] = mStdOutWr;
+    handles[1] = mStdErrWr;
+    handles[2] = mStdInRd;
+    suc = UpdateProcThreadAttribute(attributeList,
+                                    0,
+                                    PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                    handles,
+                                    3 * sizeof(HANDLE),
+                                    NULL,
+                                    NULL);
+    if (!suc) {
+        qCDebug(KLEOPATRA_LOG) << "Failed to Update Attribute List";
+        mError = getLastErrorString();
+        return false;
+
+    }
+    STARTUPINFOEX info;
+    ZeroMemory(&info, sizeof(info));
+    info.StartupInfo = siStartInfo;
+    info.StartupInfo.cb = sizeof(info); // You have to know this,..
+    info.lpAttributeList = attributeList;
+
     // Now lets start
-    bool suc = CreateProcessW(proc,
-                              cmdLine,       // command line
-                              NULL,          // process security attributes
-                              NULL,          // primary thread security attributes
-                              TRUE,          // handles are inherited
-                              CREATE_NO_WINDOW,// creation flags
-                              NULL,          // use parent's environment
-                              wd,          // use parent's current directory
-                              &siStartInfo,  // STARTUPINFO pointer
-                              &piProcInfo);  // receives PROCESS_INFORMATION
+    qCDebug(KLEOPATRA_LOG) << "Spawning:" << args;
+    suc = CreateProcessW(proc,
+                         cmdLine,       // command line
+                         NULL,          // process security attributes
+                         NULL,          // primary thread security attributes
+                         TRUE,          // handles are inherited
+                         CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,// creation flags
+                         NULL,          // use parent's environment
+                         wd,          // use parent's current directory
+                         &info.StartupInfo,  // STARTUPINFO pointer
+                         &piProcInfo);  // receives PROCESS_INFORMATION
+    DeleteProcThreadAttributeList(attributeList);
+    HeapFree(GetProcessHeap(), 0, attributeList);
+    CloseHandleX (mStdOutWr);
+    CloseHandleX (mStdErrWr);
+    CloseHandleX (mStdInRd);
 
     free(cmdLine);
     if (!suc) {
@@ -387,9 +441,8 @@ bool WindowsProcessDevice::Private::start(QIODevice::OpenMode mode)
 
     mProc = piProcInfo.hProcess;
     mThread = piProcInfo.hThread;
-
     if (mode == QIODevice::WriteOnly) {
-        CloseHandleX (mStdInRd);
+        CloseHandleX (mStdOutRd);
     }
 
     if (mode == QIODevice::ReadOnly) {

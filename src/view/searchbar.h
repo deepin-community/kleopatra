@@ -27,7 +27,7 @@ class SearchBar : public QWidget
     Q_OBJECT
 public:
     explicit SearchBar(QWidget *parent = nullptr, Qt::WindowFlags f = {});
-    ~SearchBar();
+    ~SearchBar() override;
 
     const std::shared_ptr<KeyFilter> &keyFilter() const;
 
@@ -49,8 +49,6 @@ Q_SIGNALS:
 private:
     class Private;
     kdtools::pimpl_ptr<Private> d;
-    Q_PRIVATE_SLOT(d, void slotKeyFilterChanged(int))
-    Q_PRIVATE_SLOT(d, void listNotCertifiedKeys())
     Q_PRIVATE_SLOT(d, void showOrHideCertifyButton())
 };
 

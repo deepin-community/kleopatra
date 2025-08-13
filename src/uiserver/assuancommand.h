@@ -19,7 +19,7 @@
 #include <gpg-error.h>
 
 #endif
-#include <kmime/kmime_header_parsing.h>
+#include <KMime/HeaderParsing>
 
 #include <qwindowdefs.h> // for WId
 
@@ -187,7 +187,7 @@ class AssuanCommand : public ExecutionContext, public std::enable_shared_from_th
     // defined in assuanserverconnection.cpp!
 public:
     AssuanCommand();
-    virtual ~AssuanCommand();
+    ~AssuanCommand() override;
 
     int start();
     void canceled();

@@ -1,7 +1,7 @@
 /*  view/openpgpkeycardwidget.cpp
 
     This file is part of Kleopatra, the KDE keymanager
-    SPDX-FileCopyrightText: 2021 g10 Code GmbH
+    SPDX-FileCopyrightText: 2021, 2022 g10 Code GmbH
     SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
@@ -39,6 +39,7 @@ struct KeyWidgets {
     QLabel *keyTitleLabel = nullptr;
     QLabel *keyInfoLabel = nullptr;
     QPushButton *showCertificateDetailsButton = nullptr;
+    QPushButton *generateButton = nullptr;
     QPushButton *createCSRButton = nullptr;
 };
 
@@ -51,6 +52,8 @@ KeyWidgets createKeyWidgets(const KeyPairInfo &keyInfo, QWidget *parent)
     keyWidgets.showCertificateDetailsButton = new QPushButton{i18nc("@action:button", "Show Details"), parent};
     keyWidgets.showCertificateDetailsButton->setToolTip(i18nc("@action:tooltip", "Show detailed information about this key"));
     keyWidgets.showCertificateDetailsButton->setEnabled(false);
+    keyWidgets.generateButton = new QPushButton{i18nc("@action:button", "Generate Key"), parent};
+    keyWidgets.generateButton->setEnabled(false);
     if (keyInfo.canCertify() || keyInfo.canSign() || keyInfo.canAuthenticate())
     {
         keyWidgets.createCSRButton = new QPushButton{i18nc("@action:button", "Create CSR"), parent};
@@ -94,6 +97,8 @@ OpenPGPKeyCardWidget::Private::Private(OpenPGPKeyCardWidget *q)
         const std::string keyRef = keyInfo.keyRef;
         connect(keyWidgets.showCertificateDetailsButton, &QPushButton::clicked,
                 q, [this, keyRef] () { showCertificateDetails(keyRef); });
+        connect(keyWidgets.generateButton, &QPushButton::clicked,
+                q, [q, keyRef] () { Q_EMIT q->generateKeyRequested(keyRef); });
         if (keyWidgets.createCSRButton) {
             connect(keyWidgets.createCSRButton, &QPushButton::clicked,
                     q, [q, keyRef] () { Q_EMIT q->createCSRRequested(keyRef); });
@@ -105,6 +110,7 @@ OpenPGPKeyCardWidget::Private::Private(OpenPGPKeyCardWidget *q)
 
         auto buttons = new QHBoxLayout;
         buttons->addWidget(keyWidgets.showCertificateDetailsButton);
+        buttons->addWidget(keyWidgets.generateButton);
         if (keyWidgets.createCSRButton) {
             buttons->addWidget(keyWidgets.createCSRButton);
         }
@@ -150,6 +156,7 @@ void OpenPGPKeyCardWidget::Private::updateKeyWidgets(const std::string &openPGPK
     widgets.keyTitleLabel->setVisible(cardSupportsKey);
     widgets.keyInfoLabel->setVisible(cardSupportsKey);
     widgets.showCertificateDetailsButton->setVisible(cardSupportsKey);
+    widgets.generateButton->setVisible(cardSupportsKey && (mAllowedActions & Action::GenerateKey));
     if (widgets.createCSRButton) {
         widgets.createCSRButton->setVisible(cardSupportsKey && (mAllowedActions & Action::CreateCSR));
     }
@@ -162,6 +169,8 @@ void OpenPGPKeyCardWidget::Private::updateKeyWidgets(const std::string &openPGPK
     if (widgets.keyFingerprint.empty()) {
         widgets.keyInfoLabel->setTextFormat(Qt::RichText);
         widgets.keyInfoLabel->setText(i18nc("@info", "<em>No key</em>"));
+        widgets.generateButton->setText(i18nc("@action:button", "Generate Key"));
+        widgets.generateButton->setToolTip(i18nc("@info:tooltip", "Generate a key for this card slot"));
         if (widgets.createCSRButton) {
             widgets.createCSRButton->setEnabled(false);
         }
@@ -207,10 +216,14 @@ void OpenPGPKeyCardWidget::Private::updateKeyWidgets(const std::string &openPGPK
         const auto lineSeparator = widgets.keyInfoLabel->textFormat() == Qt::PlainText ? QLatin1String("\n") : QLatin1String("<br>");
         widgets.keyInfoLabel->setText(lines.join(lineSeparator));
 
+        widgets.generateButton->setText(i18nc("@action:button", "Regenerate Key"));
+        widgets.generateButton->setToolTip(i18nc("@info:tooltip", "Generate a new key for this card slot replacing the existing key"));
         if (widgets.createCSRButton) {
             widgets.createCSRButton->setEnabled(true);
         }
     }
+
+    widgets.generateButton->setEnabled(!widgets.generateButton->isHidden());
 }
 
 void OpenPGPKeyCardWidget::Private::showCertificateDetails(const std::string &openPGPKeyRef)
@@ -221,13 +234,13 @@ void OpenPGPKeyCardWidget::Private::showCertificateDetails(const std::string &op
         const std::string keyid = widgets.keyFingerprint.substr(widgets.keyFingerprint.size() - 16);
         const auto subkeys = KeyCache::instance()->findSubkeysByKeyID({keyid});
         if (!subkeys.empty() && !subkeys[0].isNull()) {
-            auto cmd = new Commands::DetailsCommand(subkeys[0].parent(), nullptr);
+            auto cmd = new Commands::DetailsCommand(subkeys[0].parent());
             cmd->setParentWidget(q);
             cmd->start();
             return;
         }
     }
-    KMessageBox::sorry(q, i18nc("@info", "Sorry, I cannot find the key with fingerprint %1.",
+    KMessageBox::error(q, i18nc("@info", "Sorry, I cannot find the key with fingerprint %1.",
                                 Formatting::prettyID(widgets.keyFingerprint.c_str())));
 }
 
@@ -235,6 +248,9 @@ OpenPGPKeyCardWidget::OpenPGPKeyCardWidget(QWidget *parent)
     : QWidget{parent}
     , d{std::make_unique<Private>(this)}
 {
+    connect(KeyCache::instance().get(), &KeyCache::keysMayHaveChanged, this, [this]() {
+        d->update();
+    });
 }
 
 OpenPGPKeyCardWidget::~OpenPGPKeyCardWidget() = default;

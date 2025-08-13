@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: CC0-1.0
+  SPDX-FileCopyrightText: 2021 g10 Code GmbH
+  SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.kde.kleopatra.keygroup">
+    <comment>Kleopatra certificate group</comment>
+    <comment xml:lang="bg">Групи сертификати на Kleopatra</comment>
+    <comment xml:lang="ca">Grup de certificats del Kleopatra</comment>
+    <comment xml:lang="ca@valencia">Grup de certificats de Kleopatra</comment>
+    <comment xml:lang="cs">Skupina certifikátů Kleopatra</comment>
+    <comment xml:lang="de">Kleopatra-Zertifikatsgruppe</comment>
+    <comment xml:lang="en_GB">Kleopatra certificate group</comment>
+    <comment xml:lang="es">Grupo de certificados de Kleopatra</comment>
+    <comment xml:lang="fi">Kleopatra-varmenneryhmä</comment>
+    <comment xml:lang="fr">Groupe de certificats de Kleopatra</comment>
+    <comment xml:lang="ia">Gruppo de certificato de Kleopatra</comment>
+    <comment xml:lang="ie">gruppe de certificates de Kleopatra</comment>
+    <comment xml:lang="it">Gruppo di certificati di Kleopatra</comment>
+    <comment xml:lang="ka">Kleopatra სერტიფიკატების ჯგუფი</comment>
+    <comment xml:lang="ko">Kleopatra 인증서 그룹</comment>
+    <comment xml:lang="nl">Certificatengroep van Kleopatra</comment>
+    <comment xml:lang="pl">Grupa certyfikatów Kleopatry</comment>
+    <comment xml:lang="pt">Grupo de certificados do Kleopatra</comment>
+    <comment xml:lang="pt_BR">Grupo de certificados do Kleopatra</comment>
+    <comment xml:lang="ru">Группа сертификатов Kleopatra</comment>
+    <comment xml:lang="sk">Skupina certifikátov Kleopatra</comment>
+    <comment xml:lang="sl">Kleopatrina grupa potrdil</comment>
+    <comment xml:lang="sv">Kleopatra certifikatgrupp</comment>
+    <comment xml:lang="tr">Kleopatra sertifika grubu</comment>
+    <comment xml:lang="uk">група сертифікатів Kleopatra</comment>
+    <comment xml:lang="zh_CN">Kleopatra 证书组</comment>
+    <sub-class-of type="text/plain"/>
+    <generic-icon name="text-x-generic"/>
+    <magic priority="80">
+      <match type="string" value="[KeyGroup-" offset="0"/>
+    </magic>
+    <glob pattern="*.kgrp"/>
+  </mime-type>
+</mime-info>

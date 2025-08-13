@@ -16,10 +16,12 @@
 #include "tagspreferences.h"
 #include "tooltippreferences.h"
 
-#include <QGpgME/Protocol>
+#include <settings.h>
+
 #include <Libkleo/KeyFilterManager>
 #include <Libkleo/Dn>
 #include <Libkleo/DNAttributeOrderConfigWidget>
+#include <Libkleo/SystemInfo>
 
 #include <KIconDialog>
 #include <QIcon>
@@ -53,8 +55,10 @@ enum {
     MayChangeBoldRole,
     MayChangeStrikeOutRole,
     MayChangeIconRole,
+    StoredForegroundRole, /*!< Stores the actual configured foreground color */
+    StoredBackgroundRole, /*!< Stores the actual configured background color */
 
-    EndDummy
+    EndDummy,
 };
 
 static QFont tryToFindFontFor(const QListWidgetItem *item)
@@ -127,11 +131,17 @@ static void apply_config(const KConfigGroup &group, QListWidgetItem *item)
     item->setData(MayChangeNameRole, !group.isEntryImmutable("Name"));
 
     const QColor fg = group.readEntry("foreground-color", QColor());
-    item->setData(Qt::ForegroundRole, fg.isValid() ? QBrush(fg) : QVariant());
+    item->setData(StoredForegroundRole, fg.isValid() ? QBrush(fg) : QVariant());
+    if (!SystemInfo::isHighContrastModeActive()) {
+        item->setData(Qt::ForegroundRole, fg.isValid() ? QBrush(fg) : QVariant());
+    }
     item->setData(MayChangeForegroundRole, !group.isEntryImmutable("foreground-color"));
 
     const QColor bg = group.readEntry("background-color", QColor());
-    item->setData(Qt::BackgroundRole, bg.isValid() ? QBrush(bg) : QVariant());
+    item->setData(StoredBackgroundRole, bg.isValid() ? QBrush(bg) : QVariant());
+    if (!SystemInfo::isHighContrastModeActive()) {
+        item->setData(Qt::BackgroundRole, bg.isValid() ? QBrush(bg) : QVariant());
+    }
     item->setData(MayChangeBackgroundRole, !group.isEntryImmutable("background-color"));
 
     const QFont defaultFont = tryToFindFontFor(item);
@@ -206,7 +216,9 @@ static void set_default_appearance(QListWidgetItem *item)
     if (!item) {
         return;
     }
+    erase_if_allowed(item, StoredForegroundRole, MayChangeForegroundRole);
     erase_if_allowed(item, Qt::ForegroundRole, MayChangeForegroundRole);
+    erase_if_allowed(item, StoredBackgroundRole, MayChangeBackgroundRole);
     erase_if_allowed(item, Qt::BackgroundRole, MayChangeBackgroundRole);
     erase_if_allowed(item, Qt::DecorationRole, MayChangeIconRole);
     static const int fontRoles[] = { Qt::FontRole, HasFontRole };
@@ -246,8 +258,8 @@ static void save_to_config(const QListWidgetItem *item, KConfigGroup &group)
         return;
     }
     writeOrDelete(group, "Name", item->data(HasNameRole).toBool() ? item->text() : QVariant());
-    writeOrDelete(group, "foreground-color", brush2color(item->data(Qt::ForegroundRole)));
-    writeOrDelete(group, "background-color", brush2color(item->data(Qt::BackgroundRole)));
+    writeOrDelete(group, "foreground-color", brush2color(item->data(StoredForegroundRole)));
+    writeOrDelete(group, "background-color", brush2color(item->data(StoredBackgroundRole)));
     writeOrDelete(group, "icon", item->data(IconNameRole));
 
     group.deleteEntry("font");
@@ -291,9 +303,8 @@ class AppearanceConfigWidget::Private : public Ui_AppearanceConfigWidget
     AppearanceConfigWidget *const q;
 public:
     explicit Private(AppearanceConfigWidget *qq)
-        : Ui_AppearanceConfigWidget(),
-          q(qq),
-          dnOrderWidget(nullptr)
+        : Ui_AppearanceConfigWidget()
+        , q(qq)
     {
         setupUi(q);
 
@@ -301,14 +312,22 @@ public:
             l->setContentsMargins(0, 0, 0, 0);
         }
 
-        auto w = new QWidget;
-        dnOrderWidget = Kleo::DNAttributeMapper::instance()->configWidget(w);
-        dnOrderWidget->setObjectName(QStringLiteral("dnOrderWidget"));
-        (new QVBoxLayout(w))->addWidget(dnOrderWidget);
+        highContrastMsg->setVisible(SystemInfo::isHighContrastModeActive());
+        highContrastMsg->setMessageType(KMessageWidget::Warning);
+        highContrastMsg->setIcon(q->style()->standardIcon(QStyle::SP_MessageBoxWarning, nullptr, q));
+        highContrastMsg->setText(i18n("The preview of colors is disabled because high-contrast mode is active."));
+        highContrastMsg->setCloseButtonVisible(false);
 
-        tabWidget->addTab(w, i18n("DN-Attribute Order"));
+        if (Kleo::Settings{}.cmsEnabled()) {
+            auto w = new QWidget;
+            dnOrderWidget = new DNAttributeOrderConfigWidget{w};
+            dnOrderWidget->setObjectName(QStringLiteral("dnOrderWidget"));
+            (new QVBoxLayout(w))->addWidget(dnOrderWidget);
 
-        connect(dnOrderWidget, &DNAttributeOrderConfigWidget::changed, q, &AppearanceConfigWidget::changed);
+            tabWidget->addTab(w, i18n("DN-Attribute Order"));
+
+            connect(dnOrderWidget, &DNAttributeOrderConfigWidget::changed, q, &AppearanceConfigWidget::changed);
+        }
 
         connect(iconButton, SIGNAL(clicked()), q, SLOT(slotIconClicked()));
 #ifndef QT_NO_COLORDIALOG
@@ -358,7 +377,7 @@ private:
     void slotUseTagsChanged(bool);
 
 private:
-    Kleo::DNAttributeOrderConfigWidget *dnOrderWidget;
+    Kleo::DNAttributeOrderConfigWidget *dnOrderWidget = nullptr;
 };
 
 AppearanceConfigWidget::AppearanceConfigWidget(QWidget *p, Qt::WindowFlags f)
@@ -417,24 +436,39 @@ void AppearanceConfigWidget::Private::slotDefaultClicked()
 
 void AppearanceConfigWidget::defaults()
 {
-
     // This simply means "default look for every category"
     for (int i = 0, end = d->categoriesLV->count(); i != end; ++i) {
         set_default_appearance(d->categoriesLV->item(i));
     }
-    d->tooltipValidityCheckBox->setChecked(true);
-    d->tooltipOwnerCheckBox->setChecked(false);
-    d->tooltipDetailsCheckBox->setChecked(false);
 
-    d->dnOrderWidget->defaults();
+    // use a temporary TooltipPreferences instance for resetting the values to the defaults;
+    // the setters respect the immutability of the individual settings, so that we don't have
+    // to check this explicitly
+    TooltipPreferences tooltipPrefs;
+    tooltipPrefs.setShowValidity(tooltipPrefs.findItem(QStringLiteral("ShowValidity"))->getDefault().toBool());
+    d->tooltipValidityCheckBox->setChecked(tooltipPrefs.showValidity());
+    tooltipPrefs.setShowOwnerInformation(tooltipPrefs.findItem(QStringLiteral("ShowOwnerInformation"))->getDefault().toBool());
+    d->tooltipOwnerCheckBox->setChecked(tooltipPrefs.showOwnerInformation());
+    tooltipPrefs.setShowCertificateDetails(tooltipPrefs.findItem(QStringLiteral("ShowCertificateDetails"))->getDefault().toBool());
+    d->tooltipDetailsCheckBox->setChecked(tooltipPrefs.showCertificateDetails());
+
+    if (d->dnOrderWidget) {
+        const Settings settings;
+        if (!settings.isImmutable(QStringLiteral("AttributeOrder"))) {
+            d->dnOrderWidget->setAttributeOrder(DN::defaultAttributeOrder());
+        }
+    }
 
     Q_EMIT changed();
 }
 
 void AppearanceConfigWidget::load()
 {
-
-    d->dnOrderWidget->load();
+    if (d->dnOrderWidget) {
+        const Settings settings;
+        d->dnOrderWidget->setAttributeOrder(DN::attributeOrder());
+        d->dnOrderWidget->setEnabled(!settings.isImmutable(QStringLiteral("AttributeOrder")));
+    }
 
     d->categoriesLV->clear();
     KSharedConfigPtr config = KSharedConfig::openConfig(QStringLiteral("libkleopatrarc"));
@@ -443,23 +477,37 @@ void AppearanceConfigWidget::load()
     }
     const QStringList groups = config->groupList().filter(QRegularExpression(QStringLiteral("^Key Filter #\\d+$")));
     for (const QString &group : groups) {
-        //QListWidgetItem * item = new QListWidgetItem( d->categoriesLV );
-        apply_config(KConfigGroup(config, group), new QListWidgetItem(d->categoriesLV));
+        const KConfigGroup configGroup{config, group};
+        const bool isCmsSpecificKeyFilter = !configGroup.readEntry("is-openpgp-key", true);
+        auto item = new QListWidgetItem{d->categoriesLV};
+        // hide CMS-specific filters if CMS is disabled; we hide those filters
+        // instead of skipping them, so that they are not removed on save
+        item->setHidden(isCmsSpecificKeyFilter && !Kleo::Settings{}.cmsEnabled());
+        apply_config(configGroup, item);
     }
 
     const TooltipPreferences prefs;
     d->tooltipValidityCheckBox->setChecked(prefs.showValidity());
+    d->tooltipValidityCheckBox->setEnabled(!prefs.isImmutable(QStringLiteral("ShowValidity")));
     d->tooltipOwnerCheckBox->setChecked(prefs.showOwnerInformation());
+    d->tooltipOwnerCheckBox->setEnabled(!prefs.isImmutable(QStringLiteral("ShowOwnerInformation")));
     d->tooltipDetailsCheckBox->setChecked(prefs.showCertificateDetails());
+    d->tooltipDetailsCheckBox->setEnabled(!prefs.isImmutable(QStringLiteral("ShowCertificateDetails")));
 
     const TagsPreferences tagsPrefs;
     d->useTagsCheckBox->setChecked(tagsPrefs.useTags());
+    d->useTagsCheckBox->setEnabled(!tagsPrefs.isImmutable(QStringLiteral("UseTags")));
 }
 
 void AppearanceConfigWidget::save()
 {
+    if (d->dnOrderWidget) {
+        Settings settings;
+        settings.setAttributeOrder(d->dnOrderWidget->attributeOrder());
+        settings.save();
 
-    d->dnOrderWidget->save();
+        DN::setAttributeOrder(settings.attributeOrder());
+    }
 
     TooltipPreferences prefs;
     prefs.setShowValidity(d->tooltipValidityCheckBox->isChecked());
@@ -483,7 +531,7 @@ void AppearanceConfigWidget::save()
         }
     }
 #endif
-    for (int i = 0, end = std::min(groups.size(), d->categoriesLV->count()); i != end; ++i) {
+    for (int i = 0, end = std::min<int>(groups.size(), d->categoriesLV->count()); i != end; ++i) {
         const QListWidgetItem *const item = d->categoriesLV->item(i);
         Q_ASSERT(item);
         KConfigGroup group(config, groups[i]);
@@ -492,6 +540,7 @@ void AppearanceConfigWidget::save()
 
     TagsPreferences tagsPrefs;
     tagsPrefs.setUseTags(d->useTagsCheckBox->isChecked());
+    tagsPrefs.save();
 
     config->sync();
     KeyFilterManager::instance()->reload();
@@ -525,13 +574,16 @@ void AppearanceConfigWidget::Private::slotForegroundClicked()
         return;
     }
 
-    const QVariant v = brush2color(item->data(Qt::ForegroundRole));
+    const QVariant v = brush2color(item->data(StoredForegroundRole));
 
     const QColor initial = v.isValid() ? v.value<QColor>() : categoriesLV->palette().color(QPalette::Normal, QPalette::Text);
     const QColor c = QColorDialog::getColor(initial, q);
 
     if (c.isValid()) {
-        item->setData(Qt::ForegroundRole, QBrush(c));
+        item->setData(StoredForegroundRole, QBrush(c));
+        if (!SystemInfo::isHighContrastModeActive()) {
+            item->setData(Qt::ForegroundRole, QBrush(c));
+        }
         Q_EMIT q->changed();
     }
 }
@@ -543,13 +595,16 @@ void AppearanceConfigWidget::Private::slotBackgroundClicked()
         return;
     }
 
-    const QVariant v = brush2color(item->data(Qt::BackgroundRole));
+    const QVariant v = brush2color(item->data(StoredBackgroundRole));
 
     const QColor initial = v.isValid() ? v.value<QColor>() : categoriesLV->palette().color(QPalette::Normal, QPalette::Base);
     const QColor c = QColorDialog::getColor(initial, q);
 
     if (c.isValid()) {
-        item->setData(Qt::BackgroundRole, QBrush(c));
+        item->setData(StoredBackgroundRole, QBrush(c));
+        if (!SystemInfo::isHighContrastModeActive()) {
+            item->setData(Qt::BackgroundRole, QBrush(c));
+        }
         Q_EMIT q->changed();
     }
 }

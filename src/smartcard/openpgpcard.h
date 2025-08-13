@@ -3,7 +3,7 @@
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2017 Bundesamt für Sicherheit in der Informationstechnik
     SPDX-FileContributor: Intevation GmbH
-    SPDX-FileCopyrightText: 2020 g10 Code GmbH
+    SPDX-FileCopyrightText: 2020, 2022 g10 Code GmbH
     SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
@@ -16,6 +16,7 @@ namespace Kleo
 {
 namespace SmartCard
 {
+struct AlgorithmInfo;
 struct KeyPairInfo;
 
 /** Class to work with OpenPGP smartcards or compatible tokens */
@@ -37,7 +38,41 @@ public:
     static const std::vector<KeyPairInfo> & supportedKeys();
     static QString keyDisplayName(const std::string &keyRef);
 
+    /**
+     * Returns an algorithm name for the algorithm \p algorithm that is suitable
+     * for passing to scdaemon for the card slot specified by \p keyRef.
+     *
+     * For example, it maps "curve25519" to either "ed25519" or "cv25519".
+     */
+    static std::string getAlgorithmName(const std::string &algorithm, const std::string &keyRef);
+
+    /**
+     * Sets the algorithms supported by this smart card to \p algorithms.
+     * The following values for algorithms are allowed:
+     *   brainpoolP256r1, brainpoolP384r1, brainpoolP512r1,
+     *   curve25519,
+     *   nistp256, nistp384, nistp521,
+     *   rsa2048, rsa3072, rsa4096.
+     */
+    void setSupportedAlgorithms(const std::vector<std::string> &algorithms);
+
     std::string pubkeyUrl() const;
+
+    /**
+     * Returns a list of algorithm IDs and corresponding display names.
+     *
+     * \note: You have to use getAlgorithmName to map the algorithm ID to
+     *        an algorithm name suitable for a certain card slot.
+     */
+    std::vector<AlgorithmInfo> supportedAlgorithms() const;
+
+    /**
+     * Returns the ID of the default algorithm for this smart card.
+     */
+    std::string defaultAlgorithm() const;
+
+private:
+    std::vector<std::string> mAlgorithms;
 };
 } // namespace Smartcard
 } // namespace Kleopatra

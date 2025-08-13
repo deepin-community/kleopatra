@@ -27,6 +27,7 @@
 #endif
 #include <selftest/gpgagentcheck.h>
 #include <selftest/libkleopatrarccheck.h>
+#include <selftest/compliancecheck.h>
 
 #include <Libkleo/Stl_Util>
 
@@ -61,7 +62,7 @@ class SelfTestCommand::Private : Command::Private
     }
 public:
     explicit Private(SelfTestCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
 private:
     void init();
@@ -75,12 +76,9 @@ private:
         applyWindowID(dialog);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-        connect(dialog, SIGNAL(updateRequested()),
-                q_func(), SLOT(slotUpdateRequested()));
-        connect(dialog, SIGNAL(accepted()),
-                q_func(), SLOT(slotDialogAccepted()));
-        connect(dialog, SIGNAL(rejected()),
-                q_func(), SLOT(slotDialogRejected()));
+        connect(dialog, &SelfTestDialog::updateRequested, q_func(), [this]() { slotUpdateRequested(); });
+        connect(dialog, &QDialog::accepted, q_func(), [this]() { slotDialogAccepted(); });
+        connect(dialog, &QDialog::rejected, q_func(), [this]() { slotDialogRejected(); });
 
         dialog->setRunAtStartUp(runAtStartUp());
         dialog->setAutomaticMode(automatic);
@@ -133,6 +131,7 @@ private:
 #ifndef Q_OS_WIN
         tests.push_back(makeGpgAgentConnectivitySelfTest());
 #endif
+        tests.push_back(makeDeVSComplianceCheckSelfTest());
         tests.push_back(makeLibKleopatraRcSelfTest());
 
         if (!dialog && std::none_of(tests.cbegin(), tests.cend(),
@@ -145,8 +144,7 @@ private:
 
         ensureDialogCreated();
 
-        dialog->clear();
-        dialog->addSelfTests(tests);
+        dialog->setTests(tests);
 
         ensureDialogShown();
     }

@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kwatchgnupg\n"
 "Report-Msgid-Bugs-To: https://bugs.kde.org\n"
-"POT-Creation-Date: 2021-06-21 00:19+0000\n"
+"POT-Creation-Date: 2022-10-16 00:47+0000\n"
 "PO-Revision-Date: 2021-02-04 19:24+0200\n"
 "Last-Translator: Remigijus Jarmalavičius\n"
 "Language-Team: Lithuanian <kde-i18n-lt@kde.org>\n"
@@ -28,88 +28,86 @@ msgctxt "EMAIL OF TRANSLATORS"
 msgid "Your emails"
 msgstr "dgvirtual@akl.lt"
 
-#: aboutdata.cpp:24
-#, kde-format
+#: aboutdata.cpp:25
 msgid "Steffen Hansen"
 msgstr "/Steffen Hansen"
 
-#: aboutdata.cpp:24
-#, kde-format
+#: aboutdata.cpp:25
 msgid "Original Author"
 msgstr "Originalo autorius"
 
-#: aboutdata.cpp:28
+#: aboutdata.cpp:30
 #, kde-format
 msgid "KWatchGnuPG"
 msgstr "KWatchGnuPG"
 
-#: aboutdata.cpp:29
+#: aboutdata.cpp:31
 #, kde-format
 msgid "GnuPG log viewer"
 msgstr "GnuPG žurnalų žiūryklė"
 
-#: aboutdata.cpp:30
+#: aboutdata.cpp:32
 #, kde-format
 msgid "(c) 2004 Klarälvdalens Datakonsult AB\n"
 msgstr "(c) 2004 Klarälvdalens Datakonsult AB\n"
 
-#: kwatchgnupgconfig.cpp:54
+#: kwatchgnupgconfig.cpp:56
 #, kde-format
 msgctxt "@title:window"
 msgid "Configure KWatchGnuPG"
 msgstr "Konfigūruoti KWatchGnuPG"
 
-#: kwatchgnupgconfig.cpp:70
+#: kwatchgnupgconfig.cpp:72
 #, kde-format
 msgid "WatchGnuPG"
 msgstr "WatchGnuPG"
 
-#: kwatchgnupgconfig.cpp:80
+#: kwatchgnupgconfig.cpp:82
 #, kde-format
 msgid "&Executable:"
 msgstr "Vy&kdomasis failas:"
 
-#: kwatchgnupgconfig.cpp:89
+#: kwatchgnupgconfig.cpp:91
 #, kde-format
 msgid "&Socket:"
 msgstr "&Lizdas:"
 
-#: kwatchgnupgconfig.cpp:98
+#: kwatchgnupgconfig.cpp:100
 #, kde-format
 msgid "None"
 msgstr "Jokia"
 
-#: kwatchgnupgconfig.cpp:99
+#: kwatchgnupgconfig.cpp:101
 #, kde-format
 msgid "Basic"
 msgstr "Paprasta"
 
-#: kwatchgnupgconfig.cpp:100
+#: kwatchgnupgconfig.cpp:102
 #, kde-format
 msgid "Advanced"
 msgstr "Sudėtingesnis"
 
-#: kwatchgnupgconfig.cpp:101
+#: kwatchgnupgconfig.cpp:103
 #, kde-format
 msgid "Expert"
 msgstr "Ekspertas"
 
-#: kwatchgnupgconfig.cpp:102
+#: kwatchgnupgconfig.cpp:104
 #, kde-format
 msgid "Guru"
 msgstr "Guru"
 
-#: kwatchgnupgconfig.cpp:103
+#: kwatchgnupgconfig.cpp:105
 #, kde-format
 msgid "Default &log level:"
 msgstr "Numatytas ž&urnalizavimo lygis:"
 
-#: kwatchgnupgconfig.cpp:111
+#: kwatchgnupgconfig.cpp:113
 #, kde-format
 msgid "Log Window"
 msgstr "Žurnalo langas"
 
-#: kwatchgnupgconfig.cpp:123
+#: kwatchgnupgconfig.cpp:125
 #, kde-format
 msgctxt "history size spinbox suffix"
 msgid " line"
@@ -119,42 +117,42 @@ msgstr[1] " eilutės"
 msgstr[2] " eilučių"
 msgstr[3] " eilutė"
 
-#: kwatchgnupgconfig.cpp:124
+#: kwatchgnupgconfig.cpp:126
 #, kde-format
 msgid "unlimited"
 msgstr "neribotas"
 
-#: kwatchgnupgconfig.cpp:125
+#: kwatchgnupgconfig.cpp:127
 #, kde-format
 msgid "&History size:"
 msgstr "&Istorijos dydis:"
 
-#: kwatchgnupgconfig.cpp:129
+#: kwatchgnupgconfig.cpp:131
 #, kde-format
 msgid "Set &Unlimited"
 msgstr "Nurodyti &neribotą"
 
-#: kwatchgnupgconfig.cpp:136
+#: kwatchgnupgconfig.cpp:142
 #, kde-format
 msgid "Enable &word wrapping"
 msgstr "Įgalinti žodžių &kėlimą"
 
-#: kwatchgnupgmainwin.cpp:83
+#: kwatchgnupgmainwin.cpp:85
 #, kde-format
 msgid "[%1] Log cleared"
 msgstr "[%1] Žurnalas išvalytas"
 
-#: kwatchgnupgmainwin.cpp:90
+#: kwatchgnupgmainwin.cpp:92
 #, kde-format
 msgid "C&lear History"
 msgstr "&Išvalyti istoriją"
 
-#: kwatchgnupgmainwin.cpp:125
+#: kwatchgnupgmainwin.cpp:123
 #, kde-format
 msgid "[%1] Log stopped"
 msgstr "[%1] Žurnalas sustabdytas"
 
-#: kwatchgnupgmainwin.cpp:141
+#: kwatchgnupgmainwin.cpp:139
 #, kde-format
 msgid ""
 "The watchgnupg logging process could not be started.\n"
@@ -165,17 +163,17 @@ msgstr ""
 "Prašome įdiegti watchgnupg kur nors Jūsų $PATH.\n"
 "Šis žurnalo langas šiuo metu niekam nereikalingas."
 
-#: kwatchgnupgmainwin.cpp:143
+#: kwatchgnupgmainwin.cpp:141
 #, kde-format
 msgid "[%1] Log started"
 msgstr "[%1] Žurnalas pradėtas"
 
-#: kwatchgnupgmainwin.cpp:201
+#: kwatchgnupgmainwin.cpp:199
 #, kde-format
 msgid "There are no components available that support logging."
 msgstr "Nėra pasiekiamų, žurnalizavimą palaikančių komponentų."
 
-#: kwatchgnupgmainwin.cpp:207
+#: kwatchgnupgmainwin.cpp:207 kwatchgnupgmainwin.cpp:213
 #, kde-format
 msgid ""
 "The watchgnupg logging process died.\n"
@@ -184,22 +182,22 @@ msgstr ""
 "Watchgnupg žurnalizavimo procesas mirė.\n"
 "Ar norite startuoti jį iš naujo?"
 
-#: kwatchgnupgmainwin.cpp:207
+#: kwatchgnupgmainwin.cpp:209 kwatchgnupgmainwin.cpp:213
 #, kde-format
 msgid "Try Restart"
 msgstr "Mėginti paleisti iš naujo"
 
-#: kwatchgnupgmainwin.cpp:207
+#: kwatchgnupgmainwin.cpp:210 kwatchgnupgmainwin.cpp:213
 #, kde-format
 msgid "Do Not Try"
 msgstr "Nemėginti"
 
-#: kwatchgnupgmainwin.cpp:208
+#: kwatchgnupgmainwin.cpp:216
 #, kde-format
 msgid "====== Restarting logging process ====="
 msgstr "====== Perstartuoti žurnalizavimo procesą ====="
 
-#: kwatchgnupgmainwin.cpp:212
+#: kwatchgnupgmainwin.cpp:220
 #, kde-format
 msgid ""
 "The watchgnupg logging process is not running.\n"
@@ -208,12 +206,12 @@ msgstr ""
 "Watchgnupg žurnalizavimo procesas nėra įjungtas.\n"
 "Šis žurnalo langas šiuo metu niekam nereikalingas."
 
-#: kwatchgnupgmainwin.cpp:247
+#: kwatchgnupgmainwin.cpp:255
 #, kde-format
 msgid "Save Log to File"
 msgstr "Išsaugoti žurnalą į failą"
 
-#: kwatchgnupgmainwin.cpp:255
+#: kwatchgnupgmainwin.cpp:263
 #, kde-format
 msgid "Could not save file %1: %2"
 msgstr "Negalima išsaugoti failo %1: %2"

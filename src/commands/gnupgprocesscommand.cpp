@@ -111,7 +111,7 @@ class GnuPGProcessCommand::Private : Command::Private
     }
 public:
     explicit Private(GnuPGProcessCommand *qq, KeyListController *c);
-    ~Private();
+    ~Private() override;
 
 private:
     void init();
@@ -212,10 +212,13 @@ GnuPGProcessCommand::GnuPGProcessCommand(const GpgME::Key &key)
 
 void GnuPGProcessCommand::Private::init()
 {
-    connect(&process, SIGNAL(finished(int,QProcess::ExitStatus)),
-            q, SLOT(slotProcessFinished(int,QProcess::ExitStatus)));
-    connect(&process, SIGNAL(readyReadStandardError()),
-            q, SLOT(slotProcessReadyReadStandardError()));
+#if QT_DEPRECATED_SINCE(5, 13)
+    connect(&process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+#else
+    connect(&process, &QProcess::finished,
+#endif
+            q, [this](int exitCode, QProcess::ExitStatus status) { slotProcessFinished(exitCode, status); });
+    q->m_procReadyReadStdErrConnection = connect(&process, &QProcess::readyReadStandardError, q, [this]() { slotProcessReadyReadStandardError(); });
 }
 
 GnuPGProcessCommand::~GnuPGProcessCommand() {}

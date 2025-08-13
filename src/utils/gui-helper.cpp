@@ -7,6 +7,9 @@
 */
 #include "gui-helper.h"
 
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPushButton>
 #include <QWidget>
 
 #ifdef Q_OS_WIN
@@ -81,3 +84,78 @@ void Kleo::aggressive_raise(QWidget *w, bool stayOnTop)
 #endif
 }
 
+void Kleo::forceSetTabOrder(QWidget *first, QWidget *second)
+{
+    if (!first || !second || first == second) {
+        return;
+    }
+    // temporarily change the focus policy of the two widgets to something
+    // other than Qt::NoFocus because QWidget::setTabOrder() does nothing
+    // if either widget has focus policy Qt::NoFocus
+    const auto firstFocusPolicy = first->focusPolicy();
+    const auto secondFocusPolicy = second->focusPolicy();
+    if (firstFocusPolicy == Qt::NoFocus) {
+        first->setFocusPolicy(Qt::StrongFocus);
+    }
+    if (secondFocusPolicy == Qt::NoFocus) {
+        second->setFocusPolicy(Qt::StrongFocus);
+    }
+    QWidget::setTabOrder(first, second);
+    if (first->focusPolicy() != firstFocusPolicy) {
+        first->setFocusPolicy(firstFocusPolicy);
+    }
+    if (second->focusPolicy() != secondFocusPolicy) {
+        second->setFocusPolicy(secondFocusPolicy);
+    }
+}
+
+template<typename UnaryPredicate>
+bool focusFirstButtonIf(const std::vector<QAbstractButton *> &buttons, UnaryPredicate p)
+{
+    auto it = std::find_if(std::begin(buttons), std::end(buttons), p);
+    if (it != std::end(buttons)) {
+        (*it)->setFocus();
+        return true;
+    }
+    return false;
+}
+
+bool Kleo::focusFirstCheckedButton(const std::vector<QAbstractButton *> &buttons)
+{
+    return focusFirstButtonIf(buttons,
+                              [](auto btn) {
+                                  return btn && btn->isEnabled() && btn->isChecked();
+                              });
+}
+
+bool Kleo::focusFirstEnabledButton(const std::vector<QAbstractButton *> &buttons)
+{
+    return focusFirstButtonIf(buttons,
+                              [](auto btn) {
+                                  return btn && btn->isEnabled();
+                              });
+}
+
+void Kleo::unsetDefaultButtons(const QDialogButtonBox *buttonBox)
+{
+    if (!buttonBox) {
+        return;
+    }
+    const auto buttons = buttonBox->buttons();
+    for (auto button : buttons) {
+        if (auto pushButton = qobject_cast<QPushButton *>(button)) {
+            pushButton->setDefault(false);
+        }
+    }
+}
+
+void Kleo::unsetAutoDefaultButtons(const QDialog *dialog)
+{
+    if (!dialog) {
+        return;
+    }
+    const auto pushButtons = dialog->findChildren<QPushButton *>();
+    for (auto pushButton : pushButtons) {
+        pushButton->setAutoDefault(false);
+    }
+}

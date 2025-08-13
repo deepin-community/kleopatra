@@ -19,9 +19,12 @@
 #include "commands/importcertificatefromfilecommand.h"
 #include "commands/lookupcertificatescommand.h"
 #include "crypto/decryptverifytask.h"
+#include "view/htmllabel.h"
+#include "view/urllabel.h"
 
 #include <Libkleo/MessageBox>
 #include <Libkleo/Classify>
+#include <Libkleo/SystemInfo>
 
 #include <gpgme++/key.h>
 #include <gpgme++/decryptionresult.h>
@@ -63,7 +66,6 @@ static QColor txtColorForVisualCode(Task::Result::VisualCode code)
 {
     switch (code) {
     case Task::Result::AllGood:
-        return KColorScheme(QPalette::Active, KColorScheme::View).foreground(KColorScheme::PositiveText).color();
     case Task::Result::NeutralError:
     case Task::Result::Warning:
         return KColorScheme(QPalette::Active, KColorScheme::View).foreground(KColorScheme::NormalText).color();
@@ -94,8 +96,7 @@ public:
     void oneImportFinished();
 
     const std::shared_ptr<const Task::Result> m_result;
-    QLabel *m_detailsLabel = nullptr;
-    QLabel *m_actionsLabel = nullptr;
+    UrlLabel *m_auditLogLabel = nullptr;
     QPushButton *m_closeButton = nullptr;
     bool m_importCanceled = false;
 };
@@ -222,27 +223,32 @@ static QUrl auditlog_url_template()
 
 void ResultItemWidget::Private::updateShowDetailsLabel()
 {
-    if (!m_actionsLabel || !m_detailsLabel) {
-        return;
-    }
-
-    const auto parentTask = m_result->parentTask();
-    QString auditLogLink;
-    if (m_result->hasError()) {
-        auditLogLink = m_result->auditLog().formatLink(auditlog_url_template(), i18n("Diagnostics"));
-    } else {
-        auditLogLink = m_result->auditLog().formatLink(auditlog_url_template());
-    }
-    m_actionsLabel->setText(auditLogLink);
+    const auto auditLogUrl = m_result->auditLog().asUrl(auditlog_url_template());
+    const auto auditLogLinkText =
+        m_result->hasError() ? i18n("Diagnostics")
+                             : i18nc("The Audit Log is a detailed error log from the gnupg backend",
+                                     "Show Audit Log");
+    m_auditLogLabel->setUrl(auditLogUrl, auditLogLinkText);
+    m_auditLogLabel->setVisible(!auditLogUrl.isEmpty());
 }
 
 ResultItemWidget::ResultItemWidget(const std::shared_ptr<const Task::Result> &result, QWidget *parent, Qt::WindowFlags flags) : QWidget(parent, flags), d(new Private(result, this))
 {
     const QColor color = colorForVisualCode(d->m_result->code());
     const QColor txtColor = txtColorForVisualCode(d->m_result->code());
-    const QString styleSheet = QStringLiteral("QFrame,QLabel { background-color: %1; margin: 0px; }"
-                                              "QFrame#resultFrame{ border-color: %2; border-style: solid; border-radius: 3px; border-width: 1px }"
-                                              "QLabel { color: %3; padding: 5px; border-radius: 3px }").arg(color.name()).arg(color.darker(150).name()).arg(txtColor.name());
+    const QColor linkColor = txtColor;
+    const QString styleSheet = SystemInfo::isHighContrastModeActive()
+        ? QStringLiteral(
+            "QFrame,QLabel { margin: 0px; }"
+            "QFrame#resultFrame{ border-style: solid; border-radius: 3px; border-width: 1px }"
+            "QLabel { padding: 5px; border-radius: 3px }")
+        : QStringLiteral(
+              "QFrame,QLabel { background-color: %1; margin: 0px; }"
+              "QFrame#resultFrame{ border-color: %2; border-style: solid; border-radius: 3px; border-width: 1px }"
+              "QLabel { color: %3; padding: 5px; border-radius: 3px }")
+              .arg(color.name())
+              .arg(color.darker(150).name())
+              .arg(txtColor.name());
     auto topLayout = new QVBoxLayout(this);
     auto frame = new QFrame;
     frame->setObjectName(QStringLiteral("resultFrame"));
@@ -250,18 +256,18 @@ ResultItemWidget::ResultItemWidget(const std::shared_ptr<const Task::Result> &re
     topLayout->addWidget(frame);
     auto layout = new QHBoxLayout(frame);
     auto vlay = new QVBoxLayout();
-    auto overview = new QLabel;
+    auto overview = new HtmlLabel;
     overview->setWordWrap(true);
-    overview->setTextFormat(Qt::RichText);
-    overview->setText(d->m_result->overview());
-    overview->setFocusPolicy(Qt::StrongFocus);
+    overview->setHtml(d->m_result->overview());
     overview->setStyleSheet(styleSheet);
-    connect(overview, SIGNAL(linkActivated(QString)), this, SLOT(slotLinkActivated(QString)));
+    overview->setLinkColor(linkColor);
+    setFocusPolicy(overview->focusPolicy());
+    setFocusProxy(overview);
+    connect(overview, &QLabel::linkActivated,
+            this, [this](const auto &link) { d->slotLinkActivated(link); });
 
     vlay->addWidget(overview);
     layout->addLayout(vlay);
-
-    const QString details = d->m_result->details();
 
     auto actionLayout = new QVBoxLayout;
     layout->addLayout(actionLayout);
@@ -272,23 +278,21 @@ ResultItemWidget::ResultItemWidget(const std::shared_ptr<const Task::Result> &re
 
     d->addIgnoreMDCButton(actionLayout);
 
-    d->m_actionsLabel = new QLabel;
-    connect(d->m_actionsLabel, SIGNAL(linkActivated(QString)), this, SLOT(slotLinkActivated(QString)));
-    actionLayout->addWidget(d->m_actionsLabel);
-    d->m_actionsLabel->setFocusPolicy(Qt::StrongFocus);
-    d->m_actionsLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
-    d->m_actionsLabel->setStyleSheet(styleSheet);
+    d->m_auditLogLabel = new UrlLabel;
+    connect(d->m_auditLogLabel, &QLabel::linkActivated,
+            this, [this](const auto &link) { d->slotLinkActivated(link); });
+    actionLayout->addWidget(d->m_auditLogLabel);
+    d->m_auditLogLabel->setStyleSheet(styleSheet);
+    d->m_auditLogLabel->setLinkColor(linkColor);
 
-    d->m_detailsLabel = new QLabel;
-    d->m_detailsLabel->setWordWrap(true);
-    d->m_detailsLabel->setTextFormat(Qt::RichText);
-    d->m_detailsLabel->setText(details);
-    d->m_detailsLabel->setFocusPolicy(Qt::StrongFocus);
-    d->m_detailsLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
-    d->m_detailsLabel->setStyleSheet(styleSheet);
-
-    connect(d->m_detailsLabel, SIGNAL(linkActivated(QString)), this, SLOT(slotLinkActivated(QString)));
-    vlay->addWidget(d->m_detailsLabel);
+    auto detailsLabel = new HtmlLabel;
+    detailsLabel->setWordWrap(true);
+    detailsLabel->setHtml(d->m_result->details());
+    detailsLabel->setStyleSheet(styleSheet);
+    detailsLabel->setLinkColor(linkColor);
+    connect(detailsLabel, &QLabel::linkActivated,
+            this, [this](const auto &link) { d->slotLinkActivated(link); });
+    vlay->addWidget(detailsLabel);
 
     d->m_closeButton = new QPushButton;
     KGuiItem::assign(d->m_closeButton, KStandardGuiItem::close());

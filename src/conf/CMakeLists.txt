@@ -7,6 +7,12 @@ if(BUILD_libkleopatraclient)
     smimevalidationconfigurationpage.cpp
     cryptooperationsconfigwidget.cpp
     cryptooperationsconfigpage.cpp
+    smimevalidationconfigurationwidget.h
+    smimevalidationconfigurationpage.h
+    cryptooperationsconfigwidget.h
+    cryptooperationsconfigpage.h
+    smartcardconfigpage.cpp
+    smartcardconfigpage.h
   )
 
   ki18n_wrap_ui(_kcm_kleopatra_libkleopatraclient_extra_SRCS
@@ -31,6 +37,12 @@ set(kcm_kleopatra_PART_SRCS
   appearanceconfigpage.cpp
   appearanceconfigwidget.cpp
   gnupgsystemconfigurationpage.cpp
+  dirservconfigpage.h
+  appearanceconfigpage.h
+  appearanceconfigwidget.h
+  gnupgsystemconfigurationpage.h
+  labelledwidget.cpp
+  labelledwidget.cpp
   ${kleopatra_BINARY_DIR}/src/kleopatra_debug.cpp
   ${_kcm_kleopatra_libkleopatraclient_extra_SRCS}
 )
@@ -50,6 +62,7 @@ kconfig_add_kcfg_files(kcm_kleopatra_PART_SRCS
 )
 
 add_library(kcm_kleopatra_static STATIC ${kcm_kleopatra_PART_SRCS})
+set_property(TARGET kcm_kleopatra_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(kcm_kleopatra_static
   KF5::Libkleo
@@ -62,9 +75,9 @@ target_link_libraries(kcm_kleopatra_static
   ${_kcm_kleopatra_libkleopatraclient_extra_LIBS}
 )
 
-add_library(kleopatra_config_gnupgsystem MODULE kcm_gnupgsystemconfigurationpage.cpp)
-kcoreaddons_desktop_to_json(kleopatra_config_gnupgsystem kleopatra_config_gnupgsystem.desktop)
-target_link_libraries(kleopatra_config_gnupgsystem kcm_kleopatra_static KF5::CoreAddons)
+if (NOT WIN32)
+  add_library(kleopatra_config_gnupgsystem MODULE kcm_gnupgsystemconfigurationpage.cpp)
+  target_link_libraries(kleopatra_config_gnupgsystem kcm_kleopatra_static KF5::CoreAddons)
 
-install(FILES kleopatra_config_gnupgsystem.desktop DESTINATION ${KDE_INSTALL_KSERVICES5DIR})
-install(TARGETS kleopatra_config_gnupgsystem DESTINATION ${KDE_INSTALL_PLUGINDIR}/pim/kcms/kleopatra)
+  install(TARGETS kleopatra_config_gnupgsystem DESTINATION ${KDE_INSTALL_PLUGINDIR}/pim${QT_MAJOR_VERSION}/kcms/kleopatra)
+endif()

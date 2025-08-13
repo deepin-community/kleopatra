@@ -13,7 +13,6 @@
 
 #include <gpgme++/error.h>
 
-class QGridLayout;
 class QLabel;
 class QPushButton;
 
@@ -31,7 +30,7 @@ class PIVCardWidget: public QWidget
     Q_OBJECT
 public:
     explicit PIVCardWidget(QWidget *parent = nullptr);
-    ~PIVCardWidget();
+    ~PIVCardWidget() override;
 
     void setCard(const SmartCard::PIVCard* card);
 

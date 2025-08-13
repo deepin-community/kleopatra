@@ -12,8 +12,9 @@
     SPDX-License-Identifier: GPL-2.0-only
 */
 
-
 #include "configuredialog.h"
+
+#include "settings.h"
 
 #include <KConfig>
 #include <KLocalizedString>
@@ -24,6 +25,7 @@
 #include "conf/cryptooperationsconfigpage.h"
 #include "conf/dirservconfigpage.h"
 #include "conf/gnupgsystemconfigurationpage.h"
+#include "conf/smartcardconfigpage.h"
 #include "conf/smimevalidationconfigurationpage.h"
 
 ConfigureDialog::ConfigureDialog(QWidget *parent)
@@ -31,26 +33,44 @@ ConfigureDialog::ConfigureDialog(QWidget *parent)
 {
     setFaceType(KPageDialog::List);
     setWindowTitle(i18nc("@title:window", "Configure"));
-    addModule(i18n("Directory Services"),
-              QStringLiteral("kleopatra/configuration.html#configuration-directory-services"),
-              QStringLiteral("view-certificate-server-configure"),
-              new DirectoryServicesConfigurationPage(this));
-    addModule(i18n("Appearance"),
-              QStringLiteral("kleopatra/configuration-appearance.html"),
-              QStringLiteral("applications-graphics"),
-              new Kleo::Config::AppearanceConfigurationPage(this));
-    addModule(i18n("Crypto Operations"),
-              QStringLiteral("kleopatra/configuration-cryptooperations.html"),
-              QStringLiteral("document-encrypt"),
-              new Kleo::Config::CryptoOperationsConfigurationPage(this));
-    addModule(i18n("S/MIME Validation"),
-              QStringLiteral("kleopatra/configuration.html#configuration-smime-validation"),
-              QStringLiteral("preferences-system-network"),
-              new Kleo::Config::SMimeValidationConfigurationPage(this));
-    addModule(i18n("GnuPG System"),
-              QStringLiteral("kleopatra/configuration.html#configuration-gnupgsystem"),
-              QStringLiteral("document-encrypt"),
-              new Kleo::Config::GnuPGSystemConfigurationPage(this));
+
+    const auto settings = Kleo::Settings{};
+    if (settings.showDirectoryServicesConfiguration()) {
+        addModule(i18n("Directory Services"),
+                  QStringLiteral("kleopatra/configuration.html#configuration-directory-services"),
+                  QStringLiteral("view-certificate-server-configure"),
+                  new DirectoryServicesConfigurationPage(this));
+    }
+    if (settings.showAppearanceConfiguration()) {
+        addModule(i18n("Appearance"),
+                  QStringLiteral("kleopatra/configuration-appearance.html"),
+                  QStringLiteral("applications-graphics"),
+                  new Kleo::Config::AppearanceConfigurationPage(this));
+    }
+    if (settings.showCryptoOperationsConfiguration()) {
+        addModule(i18n("Crypto Operations"),
+                  QStringLiteral("kleopatra/configuration-cryptooperations.html"),
+                  QStringLiteral("document-encrypt"),
+                  new Kleo::Config::CryptoOperationsConfigurationPage(this));
+    }
+    if (settings.showSMimeValidationConfiguration() && settings.cmsEnabled()) {
+        addModule(i18n("S/MIME Validation"),
+                  QStringLiteral("kleopatra/configuration.html#configuration-smime-validation"),
+                  QStringLiteral("preferences-system-network"),
+                  new Kleo::Config::SMimeValidationConfigurationPage(this));
+    }
+    if (settings.showSmartCardsConfiguration()) {
+        addModule(i18n("Smart Cards"),
+                  QStringLiteral("kleopatra/configuration.html"),
+                  QStringLiteral("auth-sim-locked"),
+                  new Kleo::Config::SmartCardConfigurationPage{this});
+    }
+    if (settings.showGnuPGSystemConfiguration()) {
+        addModule(i18n("GnuPG System"),
+                  QStringLiteral("kleopatra/configuration.html#configuration-gnupgsystem"),
+                  QStringLiteral("document-encrypt"),
+                  new Kleo::Config::GnuPGSystemConfigurationPage(this));
+    }
 
     // We store the minimum size of the dialog on hide, because otherwise
     // the KCMultiDialog starts with the size of the first kcm, not

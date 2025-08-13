@@ -10,15 +10,17 @@
 
 #include <QWidget>
 #include <QVector>
+
+#include <Libkleo/KeyGroup>
+
 #include <gpgme++/key.h>
 
-class QGridLayout;
 class QCheckBox;
+class QVBoxLayout;
 
 namespace Kleo
 {
 class CertificateLineEdit;
-class KeyGroup;
 class KeySelectionCombo;
 class AbstractKeyListModel;
 class UnknownRecipientWidget;
@@ -27,9 +29,23 @@ class SignEncryptWidget: public QWidget
 {
     Q_OBJECT
 public:
+    enum Operation {
+        NoOperation,
+        Sign,
+        Encrypt,
+        SignAndEncrypt
+    };
+
     /** If cmsSigEncExclusive is true CMS operations can be
      * done only either as sign or as encrypt */
     explicit SignEncryptWidget(QWidget *parent = nullptr, bool cmsSigEncExclusive = false);
+
+    /** Overwrite default text with custom text, e.g. with a character marked
+     *  as shortcut key. */
+    void setSignAsText(const QString &text);
+    void setEncryptForMeText(const QString &text);
+    void setEncryptForOthersText(const QString &text);
+    void setEncryptWithPasswordText(const QString &text);
 
     /** Returns the list of recipients selected in the dialog
      * or an empty list if encryption is disabled */
@@ -43,9 +59,8 @@ public:
      * encrypt to self is disabled. */
     GpgME::Key selfKey() const;
 
-    /** Returns the operation based on the current selection or
-     * a null string if nothing would happen. */
-    QString currentOp() const;
+    /** Returns the operation based on the current selection. */
+    Operation currentOp() const;
 
     /** Whether or not symmetric encryption should also be used. */
     bool encryptSymmetric() const;
@@ -86,14 +101,18 @@ public:
     /** Remove a recipient group */
     void removeRecipient(const Kleo::KeyGroup &group);
 
-    /** Validate that each line edit with content has a key. */
+    /** Returns true if all required information has been entered. */
+    bool isComplete() const;
+
+    /** Returns true if all recipients have been resolved. Otherwise, shows
+        an error message and returns false. */
     bool validate();
 
 protected Q_SLOTS:
     void updateOp();
     void recipientsChanged();
     void recpRemovalRequested(CertificateLineEdit *w);
-    void dialogRequested(CertificateLineEdit *w);
+    void certificateSelectionRequested(CertificateLineEdit *w);
 
 protected:
     void loadKeys();
@@ -102,13 +121,18 @@ Q_SIGNALS:
     /* Emitted when the certificate selection changed the operation
      * with that selection. e.g. "Sign" or "Sign/Encrypt".
      * If no crypto operation is selected this returns a null string. */
-    void operationChanged(const QString &op);
+    void operationChanged(Operation op);
 
     /* Emitted when the certificate selection might be changed. */
     void keysChanged();
 
 private:
     CertificateLineEdit* addRecipientWidget();
+    /** Inserts a new recipient widget after widget @p after or at the end
+     *  if @p after is null. */
+    CertificateLineEdit* insertRecipientWidget(CertificateLineEdit *after);
+    void onProtocolChanged();
+    void updateCheckBoxes();
 
 private:
     KeySelectionCombo *mSigSelect = nullptr;
@@ -117,15 +141,14 @@ private:
     QVector<UnknownRecipientWidget *> mUnknownWidgets;
     QVector<GpgME::Key> mAddedKeys;
     QVector<KeyGroup> mAddedGroups;
-    QGridLayout *mRecpLayout = nullptr;
-    QString mOp;
+    QVBoxLayout *mRecpLayout = nullptr;
+    Operation mOp;
     AbstractKeyListModel *mModel = nullptr;
     QCheckBox *mSymmetric = nullptr;
     QCheckBox *mSigChk = nullptr;
     QCheckBox *mEncOtherChk = nullptr;
     QCheckBox *mEncSelfChk = nullptr;
-    int mRecpRowCount = 2;
-    GpgME::Protocol mCurrentProto;
+    GpgME::Protocol mCurrentProto = GpgME::UnknownProtocol;
     const bool mIsExclusive;
 };
 } // namespace Kleo

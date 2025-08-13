@@ -17,8 +17,6 @@
 
 #include "commands/authenticatepivcardapplicationcommand.h"
 
-#include "dialogs/certificateselectiondialog.h"
-
 #include "smartcard/openpgpcard.h"
 #include "smartcard/pivcard.h"
 #include "smartcard/readerstatus.h"
@@ -41,10 +39,10 @@
 #endif
 
 #include "kleopatra_debug.h"
+#include <kwidgetsaddons_version.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
-using namespace Kleo::Dialogs;
 using namespace Kleo::SmartCard;
 using namespace GpgME;
 
@@ -58,7 +56,7 @@ class KeyToCardCommand::Private : public CardCommand::Private
 public:
     explicit Private(KeyToCardCommand *qq, const GpgME::Subkey &subkey);
     explicit Private(KeyToCardCommand *qq, const std::string &slot, const std::string &serialNumber, const std::string &appName);
-    ~Private();
+    ~Private() override;
 
 private:
     void start();
@@ -261,13 +259,15 @@ void KeyToCardCommand::Private::startKeyToOpenPGPCard() {
     }
 
     // Now do the deed
-    const auto time = QDateTime::fromSecsSinceEpoch(subkey.creationTime(), Qt::UTC);
+    const auto time = QDateTime::fromSecsSinceEpoch(quint32(subkey.creationTime()), Qt::UTC);
     const auto timestamp = time.toString(QStringLiteral("yyyyMMdd'T'HHmmss"));
     const QString cmd = QStringLiteral("KEYTOCARD --force %1 %2 OPENPGP.%3 %4")
         .arg(QString::fromLatin1(subkey.keyGrip()), QString::fromStdString(serialNumber()))
         .arg(slot)
         .arg(timestamp);
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, cmd.toUtf8(), q_func(), "keyToOpenPGPCardDone");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pgpCard, cmd.toUtf8(), q_func(), [this](const GpgME::Error &err) {
+        q->keyToOpenPGPCardDone(err);
+    });
 }
 
 namespace {
@@ -389,7 +389,9 @@ void KeyToCardCommand::Private::startKeyToPIVCard()
     const QString cmd = QStringLiteral("KEYTOCARD --force %1 %2 %3")
         .arg(QString::fromLatin1(subkey.keyGrip()), QString::fromStdString(serialNumber()))
         .arg(QString::fromStdString(cardSlot));
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, cmd.toUtf8(), q_func(), "keyToPIVCardDone");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, cmd.toUtf8(), q_func(), [this](const GpgME::Error &err) {
+        q->keyToPIVCardDone(err);
+    });
 }
 
 void KeyToCardCommand::Private::authenticate()
@@ -453,23 +455,30 @@ void KeyToCardCommand::keyToOpenPGPCardDone(const GpgME::Error &err)
 {
     if (err) {
         d->error(i18nc("@info",
-                       "Moving the key to the card failed: %1", QString::fromUtf8(err.asString())),
-                        i18nc("@title", "Error"));
+                       "Moving the key to the card failed: %1", QString::fromUtf8(err.asString())));
     } else if (!err.isCanceled()) {
         /* TODO DELETE_KEY is too strong, because it also deletes the stub
          * of the secret key. I could not find out how GnuPG does this. Question
          * to GnuPG Developers is pending an answer
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+        if (KMessageBox::questionTwoActions(d->parentWidgetOrView(),
+#else
         if (KMessageBox::questionYesNo(d->parentWidgetOrView(),
+
+#endif
                                        i18n("Do you want to delete the key on this computer?"),
                                        i18nc("@title:window",
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+                                       "Key transferred to card")) == KMessageBox::ButtonCode::PrimaryAction) {
+#else
                                        "Key transferred to card")) == KMessageBox::Yes) {
+#endif
             const QString cmd = QStringLiteral("DELETE_KEY --force %1").arg(d->subkey.keyGrip());
             // Using readerstatus is a bit overkill but it's an easy way to talk to the agent.
             ReaderStatus::mutableInstance()->startSimpleTransaction(card, cmd.toUtf8(), this, "deleteDone");
         }
         */
-        d->information(i18nc("@info", "Successfully copied the key to the card."),
-                       i18nc("@title", "Success"));
+        d->success(i18nc("@info", "Successfully copied the key to the card."));
         ReaderStatus::mutableInstance()->updateStatus();
     }
     d->finished();
@@ -489,11 +498,9 @@ void KeyToCardCommand::keyToPIVCardDone(const GpgME::Error &err)
 #endif
 
         d->error(i18nc("@info",
-                       "Copying the key pair to the card failed: %1", QString::fromUtf8(err.asString())),
-                        i18nc("@title", "Error"));
+                       "Copying the key pair to the card failed: %1", QString::fromUtf8(err.asString())));
     } else if (!err.isCanceled()) {
-        d->information(i18nc("@info", "Successfully copied the key pair to the card."),
-                       i18nc("@title", "Success"));
+        d->success(i18nc("@info", "Successfully copied the key pair to the card."));
         ReaderStatus::mutableInstance()->updateStatus();
     }
 
@@ -503,8 +510,7 @@ void KeyToCardCommand::keyToPIVCardDone(const GpgME::Error &err)
 void KeyToCardCommand::deleteDone(const GpgME::Error &err)
 {
     if (err) {
-        d->error(i18nc("@info", "Failed to delete the key: %1", QString::fromUtf8(err.asString())),
-                        i18nc("@title", "Error"));
+        d->error(i18nc("@info", "Failed to delete the key: %1", QString::fromUtf8(err.asString())));
     }
     d->finished();
 }

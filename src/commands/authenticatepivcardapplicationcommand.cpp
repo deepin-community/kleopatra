@@ -42,7 +42,7 @@ class AuthenticatePIVCardApplicationCommand::Private : public CardCommand::Priva
     }
 public:
     explicit Private(AuthenticatePIVCardApplicationCommand *qq, const std::string &serialNumber, QWidget *p);
-    ~Private();
+    ~Private() override;
 
     void init();
 
@@ -129,7 +129,9 @@ void AuthenticatePIVCardApplicationCommand::Private::authenticate(const QByteArr
 
     const QByteArray plusPercentEncodedAdminKey = adminKey.toPercentEncoding().replace(' ', '+');
     const QByteArray command = QByteArray("SCD SETATTR AUTH-ADM-KEY ") + plusPercentEncodedAdminKey;
-    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command, q, "slotResult");
+    ReaderStatus::mutableInstance()->startSimpleTransaction(pivCard, command, q, [this](const GpgME::Error &err) {
+        slotResult(err);
+    });
 }
 
 void AuthenticatePIVCardApplicationCommand::Private::slotResult(const Error &err)
@@ -147,8 +149,7 @@ void AuthenticatePIVCardApplicationCommand::Private::slotResult(const Error &err
             return;
         }
 #endif
-        error(i18nc("@info", "Authenticating to the card failed: %1", QString::fromLatin1(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Authenticating to the card failed: %1", QString::fromLatin1(err.asString())));
     }
     finished();
 }
@@ -172,8 +173,8 @@ void AuthenticatePIVCardApplicationCommand::Private::ensureDialogCreated()
                          i18n("Please enter the PIV Card Application Administration Key in hex-encoded form.") :
                          prompt);
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 void AuthenticatePIVCardApplicationCommand::Private::slotDialogAccepted()

@@ -7,19 +7,23 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
+
 class KActionMenu;
 class QAction;
 class MainWindow;
+
 namespace Kleo
 {
 class Command;
 }
+
 class ClipboardMenu : public QObject
 {
     Q_OBJECT
 public:
     explicit ClipboardMenu(QObject *parent = nullptr);
-    ~ClipboardMenu();
+    ~ClipboardMenu() override;
 
     void setMainWindow(MainWindow *window);
 
@@ -36,12 +40,11 @@ private Q_SLOTS:
 private:
     void startCommand(Kleo::Command *cmd);
 
-    KActionMenu *mClipboardMenu;
-    QAction *mImportClipboardAction;
-    QAction *mEncryptClipboardAction;
-    QAction *mSmimeSignClipboardAction;
-    QAction *mOpenPGPSignClipboardAction;
-    QAction *mDecryptVerifyClipboardAction;
-    MainWindow *mWindow;
+    QPointer<KActionMenu> mClipboardMenu;
+    QPointer<QAction> mImportClipboardAction;
+    QPointer<QAction> mEncryptClipboardAction;
+    QPointer<QAction> mSmimeSignClipboardAction;
+    QPointer<QAction> mOpenPGPSignClipboardAction;
+    QPointer<QAction> mDecryptVerifyClipboardAction;
+    QPointer<MainWindow> mWindow;
 };
-

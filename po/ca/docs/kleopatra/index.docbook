@@ -278,7 +278,7 @@
 > s'utilitzen indistintament, i en aquest manual no en farem distincions, a excepció de quan s'indiqui de manera explícita.</para>
 
 <para
->Les &ca; poden estar signades per altres &ca; per a ser vàlides. Per descomptat, ha d'existir algun límit, pel que la &ca; de nivell superior (&ca; arrel) signa la seva clau amb ella mateixa (això s'anomena signar a si mateix). Als certificats arrel se'ls ha d'assignar manualment una validesa (sovint anomenada confiança), &pex;, després de comparar l'empremta dactilar amb la del lloc web de la &ca;. Normalment, sol fer-ho l'administrador del sistema o el venedor d'un producte que empri certificats, però també pot fer-ho qualsevol usuari amb la interfície de línia d'ordres de &gpgsm;.</para>
+>Les &ca; poden estar signades per altres &ca; per a ser vàlides. Per descomptat, ha d'existir algun límit, així que la &ca; de nivell superior (&ca; arrel) signa la seva clau amb ella mateixa (això s'anomena signar a si mateix). Als certificats arrel se'ls ha d'assignar manualment una validesa (sovint anomenada confiança), &pex;, després de comparar l'empremta dactilar amb la del lloc web de la &ca;. Normalment, sol fer-ho l'administrador del sistema o el venedor d'un producte que empri certificats, però també pot fer-ho qualsevol usuari amb la interfície de línia d'ordres de &gpgsm;.</para>
 
 <para
 >Per a veure quins dels certificats són certificats arrel, podeu canviar al mode de llista jeràrquica de claus amb <xref linkend="view-hierarchical-key-list"/>.</para>
@@ -287,7 +287,7 @@
 >Podeu veure els detalls de qualsevol certificat fent-hi doble clic o utilitzant <xref linkend="view-certificate-details"/>. Això obrirà un diàleg que us mostrarà les propietats més freqüents del certificat, la vostra cadena de certificat (&ead;, la cadena de l'emissora fins a la &ca; arrel) i un bolcat de tota la informació del certificat que es pot extraure des del dorsal.</para>
 
 <para
->Si canvieu l'anell de claus sense utilitzar el &kleopatra; (&pex;, utilitzant la interfície de la línia d'ordres de &gpgsm;), hauríeu de refrescar la vista amb <xref linkend="view-redisplay"/>.</para>
+>Si canvieu l'anell de claus sense utilitzar el &kleopatra; (&pex;, utilitzant la interfície de la línia d'ordres de &gpgsm;), hauríeu d'actualitzar la vista amb <xref linkend="view-redisplay"/>.</para>
 
 <!-- no longer in kde 4
 para
@@ -370,7 +370,7 @@ not found in 4.2
 > des del diàleg de configuració del &kleopatra;.</para>
 
 <para
->Si vàreu rebre el certificat com a un fitxer, intenteu <xref linkend="file-import-certificates"/>. &gpgsm; necessita entendre el format del fitxer de certificat; si us plau, referiu-vos al manual de &gpgsm; per a una llista dels formats de fitxer admesos.</para>
+>Si vàreu rebre el certificat com a un fitxer, intenteu <xref linkend="file-import-certificates"/>. &gpgsm; necessita entendre el format del fitxer de certificat; si us plau, consulteu el manual de &gpgsm; per a una llista dels formats de fitxer admesos.</para>
 
 <para
 >Si no <link linkend="functions-newkey"
@@ -402,7 +402,7 @@ not found in 4.2
 >Següent</guibutton
 > per anar cap al pas següent (o <guibutton
 >Enrere</guibutton
-> per a tornar a veure els passos que ja heu completat). La creació d'un requeriment de certificat pot cancel·lar-se en qualsevol moment prement el botó <guibutton
+> per a tornar a veure els passos que ja heu completat). La creació d'una sol·licitud de certificat pot cancel·lar-se en qualsevol moment prement el botó <guibutton
 >Cancel·la</guibutton
 >. </para>
 <para
@@ -423,7 +423,7 @@ not found in 4.2
 >Nom</guilabel
 >, un <guilabel
 >Correu electrònic</guilabel
-> i de mode opcional un <guilabel
+> i de manera opcional un <guilabel
 >Comentari</guilabel
 >.</para>
 </listitem>
@@ -460,13 +460,13 @@ not found in 4.2
 <para
 ><guilabel
 >Unitat organitzativa (OU):</guilabel
-> La unitat organitzacional en la que esteu (per exemple «Logística»).</para>
+> La unitat organitzacional en la qual esteu (per exemple «Logística»).</para>
 </listitem>
 <listitem>
 <para
 ><guilabel
 >Organització (O):</guilabel
-> L'organització a la que representeu (per exemple, l'empresa per a la que treballeu).</para>
+> L'organització a la qual representeu (per exemple, l'empresa per a la qual treballeu).</para>
 </listitem>
 <listitem>
 <para
@@ -636,7 +636,7 @@ as manual handling of CRLs (<xref linkend="certificates-refresh-x509"/>,
 >Importa certificats i/o claus privades des de fitxers cap a l'anell de claus local</action
 >. Vegeu <xref linkend="functions-search"/> pels detalls. </para>
             <para
->El format del fitxer del certificat hauria de ser un que estigui acceptat per &gpgsm;/&gpg;. Si us plau, referiu-vos als manuals de &gpgsm; i de &gpg; per a una llista dels formats admesos. </para>
+>El format del fitxer del certificat hauria de ser un que estigui acceptat per &gpgsm;/&gpg;. Si us plau, consulteu els manuals de &gpgsm; i de &gpg; per a una llista dels formats admesos. </para>
           </listitem>
         </varlistentry>
 
@@ -900,10 +900,10 @@ Verify Checksum Files...
           <listitem>
             <para>
               <action
->Refresca la llista de certificats.</action>
+>Actualitza la llista de certificats.</action>
             </para>
             <para
->L'ús d'aquesta funció generalment no és necessari, atès que &kleopatra; supervisa el sistema de fitxers per als canvis i refresca automàticament la llista de certificats quan sigui necessari. </para>
+>L'ús d'aquesta funció generalment no és necessari, atès que &kleopatra; supervisa el sistema de fitxers per als canvis i actualitza automàticament la llista de certificats quan sigui necessari. </para>
           </listitem>
         </varlistentry>
 
@@ -984,7 +984,7 @@ Verify Checksum Files...
 ></para>
 
 <para
->En el mode jeràrquic, els certificats estan ordenats per relacions emissor/subjecte, pel que és fàcil veure a quina certificació jeràrquica pertany un certificat donat, però és més difícil trobar un certificat inicialment (per descomptat, també podeu utilitzar la <link linkend="functions-search"
+>En el mode jeràrquic, els certificats estan ordenats per relacions emissor/subjecte, així que és fàcil veure a quina certificació jeràrquica pertany un certificat donat, però és més difícil trobar un certificat inicialment (per descomptat, també podeu utilitzar la <link linkend="functions-search"
 >barra de cerca</link
 >).</para>
 
@@ -1026,7 +1026,7 @@ Verify Checksum Files...
 >, &ead;, fa que tots els elements estiguin visibles.</para>
 
 <para
->És el valor per omissió quan s'entra en el mode de llistat de claus jeràrquic.</para>
+>És el valor predeterminat quan s'entra en el mode jeràrquic de llistat de claus.</para>
 
 <para
 >Per descomptat, encara podeu expandir i contraure els elements individualment.</para>
@@ -1473,7 +1473,7 @@ varlistentry id="certificates-download">
 ><guimenu
 >Eines</guimenu
 ><guimenuitem
->Visor del registre de GnuPG</guimenuitem
+>Visualitzador del registre de GnuPG</guimenuitem
 > </menuchoice>
           </term>
           <listitem>
@@ -1494,13 +1494,13 @@ varlistentry id="certificates-download">
 ><guimenu
 >Eines</guimenu
 ><guimenuitem
->Refresca els certificats OpenPGP</guimenuitem
+>Actualitza els certificats OpenPGP</guimenuitem
 > </menuchoice>
           </term>
           <listitem>
             <para
 ><action
->Refresca tots els certificats &openpgp;</action
+>Actualitza tots els certificats &openpgp;</action
 > mitjançant l'execució de <programlisting
 ><command
 >gpg&nbsp;<option
@@ -1519,13 +1519,13 @@ varlistentry id="certificates-download">
 ><guimenu
 >Eines</guimenu
 ><guimenuitem
->Refresca els certificats X.509</guimenuitem
+>Actualitza els certificats X.509</guimenuitem
 > </menuchoice>
           </term>
           <listitem>
             <para
 ><action
->Refresca tots els certificats &smime;</action
+>Actualitza tots els certificats &smime;</action
 > mitjançant l'execució de <programlisting
 ><!--
                 --><command
@@ -1879,7 +1879,7 @@ updated.</para>
 ></term>
 <listitem>
 <para
->Desencripta i/o verifica els fitxer/s.</para>
+>Desencripta i/o verifica el/s fitxer/s.</para>
 </listitem>
 </varlistentry>
 
@@ -1941,7 +1941,7 @@ updated.</para>
 >hkp</guilabel
 >, el protocol de servidor de claus Horowitz, avui en dia el protocol de servidor de claus &http;, un protocol basat en &http; que pràcticament suporten tots els servidors de claus &openpgp; públics. </para>
             <para
->Si us plau, referiu-vos als manuals de &gpg; i de &gpgsm; per a una llista dels esquemes suportats. </para>
+>Si us plau, consulteu els manuals de &gpg; i de &gpgsm; per a una llista dels esquemes suportats. </para>
           </listitem>
         </varlistentry>
         <varlistentry id="configuration-directory-services-server-name">
@@ -2217,7 +2217,7 @@ list.</para>
           </listitem>
         </orderedlist>
         <para
->La primera opció necessita l'avantatge que el tipus de lletra segueixi l'estil que escolliu per a tot el &kde;, mentre que l'última us dóna control complet sobre el tipus de lletra que s'usarà. La decisió és vostra. </para>
+>La primera opció necessita l'avantatge que el tipus de lletra segueixi l'estil que escolliu per a tot el &kde;, mentre que l'última us dona control complet sobre el tipus de lletra que s'usarà. La decisió és vostra. </para>
         <para
 >Per utilitzar el tipus de lletra estàndard modificada, seleccioneu la categoria de la llista, i marqueu o desmarqueu els modificadors de tipus de lletra <guilabel
 >Cursiva</guilabel
@@ -2248,11 +2248,11 @@ list.</para>
 ></title>
 
 <para
->Tot i que els &dn; són jeràrquics, l'ordre dels components individuals (anomenats &dn; relatius (les RDN), o atributs &dn;) no està definit. L'ordre en el que es mostren els atributs és, per tant, qüestió de gustos personals o de política d'empresa, d'aquí que sigui configurable al &kleopatra;.</para>
+>Tot i que els &dn; són jeràrquics, l'ordre dels components individuals (anomenats &dn; relatius (les RDN), o atributs &dn;) no està definit. L'ordre en què es mostren els atributs és, per tant, qüestió de gustos personals o de política d'empresa, d'aquí que sigui configurable al &kleopatra;.</para>
 
 <note
 ><para
->Aquesta opció no només s'aplica al &kleopatra;, si no a totes les aplicacions que utilitzen la seva tecnologia. En el moment d'escriure aquestes línies, entre elles estaven el &kmail;, el &kaddressbook;, així com el mateix &kleopatra;, per descomptat.</para
+>Aquesta opció no només s'aplica al &kleopatra;, sinó a totes les aplicacions que utilitzen la seva tecnologia. En el moment d'escriure aquestes línies, entre elles estaven el &kmail;, el &kaddressbook;, així com el mateix &kleopatra;, per descomptat.</para
 ></note>
 
 <para
@@ -2490,7 +2490,7 @@ list.</para>
 ></term>
             <listitem>
               <para
->Seleccioneu aquí el certificat amb el que el servidor &ocsp; signa les seves respostes. </para>
+>Seleccioneu aquí el certificat amb el qual el servidor &ocsp; signa les seves respostes. </para>
             </listitem>
           </varlistentry>
           <varlistentry id="configuration-smime-validation-ocsp-ignore-service-url">
@@ -2627,7 +2627,7 @@ list.</para>
 ></term>
             <listitem>
               <para
->Si no s'ha definit cap intermediari del sistema, o heu d'utilitzar un intermediari diferent per a &gpgsm;, introduïu aquí la seva localització. </para>
+>Si no s'ha definit cap intermediari del sistema o heu d'utilitzar un intermediari diferent per a &gpgsm;, introduïu aquí la seva ubicació. </para>
               <para
 >S'utilitzarà per a totes les peticions &HTTP; relatives a S/&MIME;. </para>
               <para
@@ -2878,7 +2878,7 @@ list.</para>
 >La guia de l'administrador descriu maneres per a personalitzar &kleopatra; a les que no es pot accedir mitjançant l'&IGU;, sinó tan sols amb fitxers de configuració.</para>
 
 <para
->S'assumeix que el lector està familiaritzat amb la tecnologia que s'usa per a configurar les aplicacions &kde;, incloent-hi la disposició, la localització en el sistema de fitxers i la cascada de fitxers de configuració de &kde;, així com l'entorn KIOSK.</para>
+>S'assumeix que el lector està familiaritzat amb la tecnologia que s'usa per a configurar les aplicacions &kde;, incloent-hi la disposició, la ubicació en el sistema de fitxers i la cascada de fitxers de configuració del &kde;, així com l'entorn KIOSK.</para>
 
 <sect1 id="admin-certificate-request-wizard"
 ><title
@@ -2945,7 +2945,7 @@ CN[$e]=$USER
 ;estableix el nom de l'empresa a «La meva empresa», no permet editar
 O[$i]=La meva empresa
 
-;estableix el nom del departament segons el que retorni l'script
+;estableix el nom del departament segons què retorni l'script
 OU[$ei]=$(lookup_dept_from_ip)
 
 ;estableix el país a AD, però permet que l'usuari el canviï
@@ -3093,7 +3093,7 @@ C=AD
 >. Aquesta secció descriu com es poden editar les categories disponibles i afegir-ne de noves. </para>
 
       <para
->Quan s'intenta localitzar la categoria a la que pertany una clau, &kleopatra; intenta fer coincidir la clau amb una seqüència de filtres de claus, configurats en el fitxer <filename
+>Quan s'intenta localitzar la categoria a la qual pertany una clau, &kleopatra; intenta fer coincidir la clau amb una seqüència de filtres de claus, configurats en el fitxer <filename
 >libkleopatrarc</filename
 >. El primer que coincideix defineix la categoria, basant-se en un concepte d'<emphasis
 >especificitat</emphasis
@@ -3130,7 +3130,7 @@ C=AD
       <para
 ><xref linkend="table-key-filters-appearance"/> Llista totes les claus que defineixen les propietats de visualització de claus que pertanyen a aquesta categoria (&ead;, les claus que es poden ajustar en el <link linkend="configuration-appearance-certificate-filters"
 >diàleg de configuració</link
->), mentre que <xref linkend="table-key-filters-criteria"/> llista totes les claus que estableixen els criteris contra els que es comproven les claus. </para>
+>), mentre que <xref linkend="table-key-filters-criteria"/> llista totes les claus que coincideixen amb els criteris definits de filtratge de claus. </para>
 
       <table id="table-key-filters-appearance">
 	<title
@@ -3450,11 +3450,11 @@ C=AD
 >prefix</replaceable
 >&nbsp;=&nbsp;<literal
 >is-at-most</literal
->) la confiança del propietari dóna el valor de la clau de configuració. Si hi ha més d'una clau <varname
+>) la confiança del propietari dona el valor de la clau de configuració. Si hi ha més d'una clau <varname
 ><replaceable
 >prefix</replaceable
 >-ownertrust</varname
-> (amb diferents valors per a <replaceable
+> (amb diferents valors de <replaceable
 >prefix</replaceable
 >) en tan sols un grup, el comportament està sense definir. </entry>
 	    </row>
@@ -3532,7 +3532,7 @@ C=AD
 >, ja que no produeixen contexts. </para>
 
       <para
->En general, els criteris no especificats (&ead;, l'entrada de configuració no està definida) no són comprovats. Si es dóna un criteri, es comprova i aquest haurà de coincidir en tot amb el filtre perquè es faci coincidir, &ead;, els criteris són a la vegada AND. </para>
+>En general, els criteris no especificats (&ead;, l'entrada de configuració no està definida) no són comprovats. Si es dona un criteri, es comprova i aquest haurà de coincidir en tot amb el filtre perquè es faci coincidir, &ead;, els criteris són a la vegada AND. </para>
 
       <para
 >Cada filtre té una «especificitat» implícita que s'utilitza per classificar tots els filtres que coincideixen. Els filtre més específic guanya sobre els menys específics. Si dos filtres tenen la mateixa especificitat, guanya el que està primer en el fitxer de configuració. L'especificitat d'un filtre és proporcional al nombre de criteris que conté. </para>
@@ -3578,7 +3578,7 @@ is-at-least-ownertrust=marginal
 >Configurar arxivadors per a l'ús amb fitxers signa/encripta</title>
 
       <para
->&kleopatra; permet a l'administrador (i a l'usuari avançat) configurar la llista d'arxivadors que es presenten en el diàleg de signa/encripta fitxers. </para>
+>&kleopatra; permet a l'administrador (i a l'usuari avançat) configurar la llista d'arxivadors que es presenten en el diàleg de signar/encriptar fitxers. </para>
 
       <para
 >Cada arxivador es defineix en <filename
@@ -3688,7 +3688,7 @@ is-at-least-ownertrust=marginal
 >pack-command=tar cf -</programlisting
 > Exemple (zip): <programlisting
 >pack-command=zip -r - %f</programlisting
-> En aquest cas, els noms de fitxer es passen a la línia d'ordres, igual que ho faria quan s'utilitza un intèrpret d'ordres. &kleopatra; no utilitza un intèrpret d'ordres per executar l'ordre. Per tant, aquesta és una manera segura de passar els noms de fitxer, però podríeu trobar restriccions de longitud de línia d'ordres en algunes plataformes. Si és present un literal <literal
+> En aquest cas, els noms de fitxer es passen a la línia d'ordres, igual que ho faria quan s'utilitza un indicador d'ordres. &kleopatra; no utilitza un intèrpret d'ordres per executar l'ordre. Per tant, aquesta és una manera segura de passar els noms de fitxer, però podríeu trobar restriccions de longitud de línia d'ordres en algunes plataformes. Si és present un literal <literal
 >%f</literal
 >, serà substituït pels noms de fitxer a arxiu. En cas contrari, els noms de fitxer s'afegeixen a la línia d'ordres. Així, l'anterior exemple zip en forma equivalent es pot escriure així: <programlisting
 >pack-command=zip -r -</programlisting>
@@ -3818,7 +3818,7 @@ is-at-least-ownertrust=marginal
 > <para
 > Com que les expressions regulars solen contenir barres invertides, s'ha de tenir cura d'escapar-les adequadament al fitxer de configuració. Es recomana l'ús d'una eina d'edició del fitxer de configuració. </para
 > </note
-> La plataforma permet definir si els patrons són o no tractats com sensibles a majúscules. </para>
+> La plataforma permet definir si els patrons són o no tractats distingint majúscules i minúscules. </para>
           </listitem>
         </varlistentry>
 
@@ -3862,7 +3862,7 @@ is-at-least-ownertrust=marginal
 ></term>
           <listitem>
             <para
->L'ordre real amb la que crear fitxers de suma de verificació. La sintaxi, les restriccions i les opcions de pas d'arguments són les mateixes que les descrites per <xref linkend="archive-definition-pack-command"/> a <xref linkend="admin-archive-definitions"/>. </para>
+>L'ordre real amb què crear fitxers de suma de verificació. La sintaxi, les restriccions i les opcions de pas d'arguments són les mateixes que les descrites per <xref linkend="archive-definition-pack-command"/> a <xref linkend="admin-archive-definitions"/>. </para>
           </listitem>
         </varlistentry>
 

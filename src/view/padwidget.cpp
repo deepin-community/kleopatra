@@ -10,10 +10,14 @@
 
 #include "kleopatra_debug.h"
 
+#include <settings.h>
+
 #include <Libkleo/KleoException>
 #include <Libkleo/Classify>
+#include <Libkleo/Compliance>
 #include <Libkleo/KeyCache>
 #include <Libkleo/Formatting>
+#include <Libkleo/SystemInfo>
 
 #include "crypto/gui/signencryptwidget.h"
 #include "crypto/gui/resultitemwidget.h"
@@ -41,11 +45,12 @@
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
+#include <QStyle>
 
 #include <KLocalizedString>
 #include <KColorScheme>
 #include <KMessageBox>
-
+#include <KMessageWidget>
 #include <KSharedConfig>
 #include <KConfigGroup>
 
@@ -69,13 +74,17 @@ static GpgME::Protocol getProtocol(const std::shared_ptr<const Kleo::Crypto::Tas
 
 class PadWidget::Private
 {
+    friend class ::Kleo::PadWidget;
+
 public:
     Private(PadWidget *qq):
         q(qq),
         mEdit(new QTextEdit),
         mCryptBtn(new QPushButton(QIcon::fromTheme(QStringLiteral("document-edit-sign-encrypt")), i18n("Sign / Encrypt Notepad"))),
         mDecryptBtn(new QPushButton(QIcon::fromTheme(QStringLiteral("document-edit-decrypt-verify")), i18n("Decrypt / Verify Notepad"))),
+        mImportBtn(new QPushButton(QIcon::fromTheme(QStringLiteral("view-certificate-import")), i18n("Import Notepad"))),
         mRevertBtn(new QPushButton(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Revert"))),
+        mMessageWidget{new KMessageWidget},
         mAdditionalInfoLabel(new QLabel),
         mSigEncWidget(new SignEncryptWidget(nullptr, true)),
         mProgressBar(new QProgressBar),
@@ -91,6 +100,7 @@ public:
         vLay->addLayout(btnLay);
         btnLay->addWidget(mCryptBtn);
         btnLay->addWidget(mDecryptBtn);
+        btnLay->addWidget(mImportBtn);
         btnLay->addWidget(mRevertBtn);
 
         mRevertBtn->setVisible(false);
@@ -98,6 +108,17 @@ public:
         btnLay->addWidget(mAdditionalInfoLabel);
 
         btnLay->addStretch(-1);
+
+        mMessageWidget->setMessageType(KMessageWidget::Warning);
+        mMessageWidget->setIcon(q->style()->standardIcon(QStyle::SP_MessageBoxWarning, nullptr, q));
+        mMessageWidget->setText(i18n("Signing and encryption is not possible."));
+        mMessageWidget->setToolTip(xi18nc("@info %1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
+                                         "<para>You cannot use <application>Kleopatra</application> for signing or encryption "
+                                         "because the <application>GnuPG</application> system used by <application>Kleopatra</application> is not %1.</para>",
+                                         DeVSCompliance::name(true)));
+        mMessageWidget->setCloseButtonVisible(false);
+        mMessageWidget->setVisible(false);
+        vLay->addWidget(mMessageWidget);
 
         mProgressBar->setRange(0, 0);
         mProgressBar->setVisible(false);
@@ -145,7 +166,7 @@ public:
         mEdit->setAcceptRichText(false);
         mEdit->setMinimumWidth(QFontMetrics(fixedFont).averageCharWidth() * 70);
 
-        if (KeyCache::instance()->pgpOnly()) {
+        if (KeyCache::instance()->pgpOnly() || !Settings{}.cmsEnabled()) {
             mSigEncWidget->setProtocol(GpgME::OpenPGP);
         } else {
             auto grp = new QButtonGroup(q);
@@ -177,27 +198,27 @@ public:
                 });
         }
 
-        updateCommitButton();
+        updateButtons();
 
         connect(mEdit, &QTextEdit::textChanged, q, [this] () {
-                updateCommitButton();
+                updateButtons();
             });
 
         connect(mCryptBtn, &QPushButton::clicked, q, [this] () {
-                if (mImportProto != GpgME::UnknownProtocol) {
-                    doImport();
-                } else {
-                    doEncryptSign();
-                }
+                doEncryptSign();
             });
 
-        connect(mSigEncWidget, &SignEncryptWidget::operationChanged, q, [this] (const QString &) {
-                updateCommitButton();
+        connect(mSigEncWidget, &SignEncryptWidget::operationChanged, q, [this]() {
+                updateButtons();
             });
 
         connect(mDecryptBtn, &QPushButton::clicked, q, [this] () {
                 doDecryptVerify();
             });
+
+        connect(mImportBtn, &QPushButton::clicked, q, [this]() {
+            doImport();
+        });
 
         connect(mRevertBtn, &QPushButton::clicked, q, [this] () {
                 revert();
@@ -257,18 +278,19 @@ public:
 
     void cryptDone(const std::shared_ptr<const Kleo::Crypto::Task::Result> &result)
     {
-        updateCommitButton();
-        mDecryptBtn->setEnabled(true);
+        updateButtons();
         mProgressBar->setVisible(false);
         mProgressLabel->setVisible(false);
 
-        mLastResultWidget = new ResultItemWidget(result);
-        mLastResultWidget->showCloseButton(true);
-        mStatusLay->addWidget(mLastResultWidget);
+        if (!result->error().isCanceled()) {
+            mLastResultWidget = new ResultItemWidget(result);
+            mLastResultWidget->showCloseButton(true);
+            mStatusLay->addWidget(mLastResultWidget);
 
-        connect(mLastResultWidget, &ResultItemWidget::closeButtonClicked, q, [this] () {
-            removeLastResultItem();
-        });
+            connect(mLastResultWidget, &ResultItemWidget::closeButtonClicked, q, [this] () {
+                removeLastResultItem();
+            });
+        }
 
         // Check result protocol
         if (mPGPRB) {
@@ -285,21 +307,21 @@ public:
             config.writeEntry("wasCMS", proto == GpgME::CMS);
         }
 
-        if (result->errorCode()) {
+        if (result->error()) {
             if (!result->errorString().isEmpty()) {
                 KMessageBox::error(q,
                         result->errorString(),
                         i18nc("@title", "Error in crypto action"));
             }
-            return;
-        }
-        mEdit->setPlainText(QString::fromUtf8(mOutputData));
-        mOutputData.clear();
-        mRevertBtn->setVisible(true);
+        } else if (!result->error().isCanceled()) {
+            mEdit->setPlainText(QString::fromUtf8(mOutputData));
+            mOutputData.clear();
+            mRevertBtn->setVisible(true);
 
-        const auto decryptVerifyResult = dynamic_cast<const Kleo::Crypto::DecryptVerifyResult*>(result.get());
-        if (decryptVerifyResult) {
-            updateRecipientsFromResult(*decryptVerifyResult);
+            const auto decryptVerifyResult = dynamic_cast<const Kleo::Crypto::DecryptVerifyResult*>(result.get());
+            if (decryptVerifyResult) {
+                updateRecipientsFromResult(*decryptVerifyResult);
+            }
         }
     }
 
@@ -331,15 +353,14 @@ public:
             KMessageBox::error(q,
                     e.message(),
                     i18nc("@title", "Error in crypto action"));
-            mCryptBtn->setEnabled(true);
-            mDecryptBtn->setEnabled(true);
+            updateButtons();
             mProgressBar->setVisible(false);
             mProgressLabel->setVisible(false);
             return;
         }
 
         connect (task, &Task::result, q, [this, task] (const std::shared_ptr<const Kleo::Crypto::Task::Result> &result) {
-                qCDebug(KLEOPATRA_LOG) << "Decrypt / Verify done. Err:" << result->errorCode();
+                qCDebug(KLEOPATRA_LOG) << "Decrypt / Verify done. Err:" << result->error().code();
                 task->deleteLater();
                 cryptDone(result);
             });
@@ -359,6 +380,7 @@ public:
     {
         mCryptBtn->setEnabled(false);
         mDecryptBtn->setEnabled(false);
+        mImportBtn->setEnabled(false);
         mProgressBar->setVisible(true);
         mProgressLabel->setVisible(true);
         mInputData = mEdit->toPlainText().toUtf8();
@@ -367,8 +389,29 @@ public:
 
     void doEncryptSign()
     {
+        if (DeVSCompliance::isActive() && !DeVSCompliance::isCompliant()) {
+            KMessageBox::error(q->topLevelWidget(),
+                               xi18nc("@info %1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
+                                      "<para>Sorry! You cannot use <application>Kleopatra</application> for signing or encryption "
+                                      "because the <application>GnuPG</application> system used by <application>Kleopatra</application> is not %1.</para>",
+                                      DeVSCompliance::name(true)));
+            return;
+        }
+
         doCryptoCommon();
-        mProgressLabel->setText(mSigEncWidget->currentOp() + QStringLiteral("..."));
+        switch (mSigEncWidget->currentOp()) {
+        case SignEncryptWidget::Sign:
+            mProgressLabel->setText(i18nc("@info:progress", "Signing notepad..."));
+            break;
+        case SignEncryptWidget::Encrypt:
+            mProgressLabel->setText(i18nc("@info:progress", "Encrypting notepad..."));
+            break;
+        case SignEncryptWidget::SignAndEncrypt:
+            mProgressLabel->setText(i18nc("@info:progress", "Signing and encrypting notepad..."));
+            break;
+        default:
+            ;
+        };
         auto input = Input::createFromByteArray(&mInputData,  i18n("Notepad"));
         auto output = Output::createFromByteArray(&mOutputData, i18n("Notepad"));
 
@@ -400,7 +443,7 @@ public:
         }
 
         connect (task, &Task::result, q, [this, task] (const std::shared_ptr<const Kleo::Crypto::Task::Result> &result) {
-                qCDebug(KLEOPATRA_LOG) << "Encrypt / Sign done. Err:" << result->errorCode();
+                qCDebug(KLEOPATRA_LOG) << "Encrypt / Sign done. Err:" << result->error().code();
                 task->deleteLater();
                 cryptDone(result);
             });
@@ -413,12 +456,10 @@ public:
         mProgressLabel->setText(i18n("Importing..."));
         auto cmd = new Kleo::ImportCertificateFromDataCommand(mInputData, mImportProto);
         connect(cmd, &Kleo::ImportCertificatesCommand::finished, q, [this] () {
-                mCryptBtn->setEnabled(true);
-                mDecryptBtn->setEnabled(true);
+                updateButtons();
                 mProgressBar->setVisible(false);
                 mProgressLabel->setVisible(false);
 
-                updateCommitButton();
                 mRevertBtn->setVisible(true);
                 mEdit->setPlainText(QString());
             });
@@ -440,44 +481,37 @@ public:
         }
     }
 
-    void updateCommitButton()
+    void updateButtons()
     {
         mAdditionalInfoLabel->setVisible(false);
 
+        mDecryptBtn->setEnabled(mEdit->document() && !mEdit->document()->isEmpty());
+
         checkImportProtocol();
+        mImportBtn->setEnabled(mImportProto != GpgME::UnknownProtocol);
 
-        if (mImportProto != GpgME::UnknownProtocol) {
-            mCryptBtn->setText(i18nc("1 is an operation to apply to the notepad. "
-                                     "Like Sign/Encrypt or just Encrypt.", "%1 Notepad",
-                                     i18n("Import")));
-            mCryptBtn->setDisabled(false);
-            return;
-        }
+        mCryptBtn->setEnabled(mSigEncWidget->currentOp() != SignEncryptWidget::NoOperation);
+        switch (mSigEncWidget->currentOp()) {
+        case SignEncryptWidget::Sign:
+            mCryptBtn->setText(i18nc("@action:button", "Sign Notepad"));
+            break;
+        case SignEncryptWidget::Encrypt:
+            mCryptBtn->setText(i18nc("@action:button", "Encrypt Notepad"));
+            break;
+        case SignEncryptWidget::SignAndEncrypt:
+        default:
+            mCryptBtn->setText(i18nc("@action:button", "Sign / Encrypt Notepad"));
+        };
 
-        if (!mSigEncWidget->currentOp().isEmpty()) {
-            mCryptBtn->setDisabled(false);
-            mCryptBtn->setText(i18nc("1 is an operation to apply to the notepad. "
-                                     "Like Sign/Encrypt or just Encrypt.", "%1 Notepad",
-                                     mSigEncWidget->currentOp()));
-        } else {
-            mCryptBtn->setText(i18n("Sign / Encrypt Notepad"));
-            mCryptBtn->setDisabled(true);
-        }
-
-        if (Kleo::gpgComplianceP("de-vs")) {
-            bool de_vs = mSigEncWidget->isDeVsAndValid();
-            mCryptBtn->setIcon(QIcon::fromTheme(de_vs
-                        ? QStringLiteral("security-high")
-                        : QStringLiteral("security-medium")));
-            mCryptBtn->setStyleSheet(QStringLiteral("background-color: ") + (de_vs
-                        ? KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::PositiveBackground).color().name()
-                        : KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::NegativeBackground).color().name()));
-            mAdditionalInfoLabel->setText(de_vs
-                    ? i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                        "%1 communication possible.", Formatting::deVsString())
-                    : i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                        "%1 communication not possible.", Formatting::deVsString()));
+        if (DeVSCompliance::isActive()) {
+            const bool de_vs = DeVSCompliance::isCompliant() && mSigEncWidget->isDeVsAndValid();
+            DeVSCompliance::decorate(mCryptBtn, de_vs);
+            mAdditionalInfoLabel->setText(DeVSCompliance::name(de_vs));
             mAdditionalInfoLabel->setVisible(true);
+            if (!DeVSCompliance::isCompliant()) {
+                mCryptBtn->setEnabled(false);
+            }
+            mMessageWidget->setVisible(!DeVSCompliance::isCompliant());
         }
     }
 
@@ -486,7 +520,9 @@ private:
     QTextEdit *mEdit;
     QPushButton *mCryptBtn;
     QPushButton *mDecryptBtn;
+    QPushButton *mImportBtn;
     QPushButton *mRevertBtn;
+    KMessageWidget *mMessageWidget;
     QLabel *mAdditionalInfoLabel;
     QByteArray mInputData;
     QByteArray mOutputData;
@@ -505,4 +541,9 @@ PadWidget::PadWidget(QWidget *parent):
     QWidget(parent),
     d(new Private(this))
 {
+}
+
+void PadWidget::focusFirstChild(Qt::FocusReason reason)
+{
+    d->mEdit->setFocus(reason);
 }

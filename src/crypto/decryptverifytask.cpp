@@ -17,6 +17,7 @@
 #include <QGpgME/DecryptJob>
 #include <QGpgME/DecryptVerifyJob>
 
+#include <Libkleo/Compliance>
 #include <Libkleo/Dn>
 #include <Libkleo/KleoException>
 #include <Libkleo/Stl_Util>
@@ -32,7 +33,7 @@
 #include <utils/auditlog.h>
 #include <Libkleo/GnuPG>
 
-#include <kmime/kmime_header_parsing.h>
+#include <KMime/HeaderParsing>
 
 #include <gpgme++/error.h>
 #include <gpgme++/key.h>
@@ -48,6 +49,7 @@
 
 #include <QByteArray>
 #include <QDateTime>
+#include <QIODevice>
 #include <QStringList>
 #include <QTextDocument> // Qt::escape
 
@@ -125,7 +127,8 @@ static Mailbox mailbox(const UserID &uid)
 static std::vector<Mailbox> extractMailboxes(const Key &key)
 {
     std::vector<Mailbox> res;
-    Q_FOREACH (const UserID &id, key.userIDs()) {
+    const auto userIDs{key.userIDs()};
+    for (const UserID &id : userIDs) {
         const Mailbox mbox = mailbox(id);
         if (!mbox.addrSpec().isEmpty()) {
             res.push_back(mbox);
@@ -257,7 +260,7 @@ static QString formatSigningInformation(const Signature &sig)
     if (sig.isNull()) {
         return QString();
     }
-    const QDateTime dt = sig.creationTime() != 0 ? QDateTime::fromSecsSinceEpoch(sig.creationTime()) : QDateTime();
+    const QDateTime dt = sig.creationTime() != 0 ? QDateTime::fromSecsSinceEpoch(quint32(sig.creationTime())) : QDateTime();
     QString text;
     Key key = sig.key();
     if (dt.isValid()) {
@@ -268,14 +271,14 @@ static QString formatSigningInformation(const Signature &sig)
     }
     text += i18n("With certificate:") + QStringLiteral("<br>") + renderKey(key);
 
-    if (Kleo::gpgComplianceP("de-vs")) {
+    if (DeVSCompliance::isCompliant()) {
         text +=
             (QStringLiteral("<br/>")
-             + (IS_DE_VS(sig)
+             + (sig.isDeVs()
                 ? i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                        "The signature is %1", Formatting::deVsString())
+                        "The signature is %1", DeVSCompliance::name(true))
                 : i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                        "The signature <b>is not</b> %1.", Formatting::deVsString())));
+                        "The signature <b>is not</b> %1.", DeVSCompliance::name(true))));
     }
 
     return text;
@@ -318,7 +321,8 @@ static bool IsGoodOrValid(const Signature &sig)
 
 static UserID findUserIDByMailbox(const Key &key, const Mailbox &mbox)
 {
-    Q_FOREACH (const UserID &id, key.userIDs())
+    const auto userIDs{key.userIDs()};
+    for (const UserID &id : userIDs)
         if (mailbox_equal(mailbox(id), mbox, Qt::CaseInsensitive)) {
             return id;
         }
@@ -525,21 +529,58 @@ static QString formatVerificationResultDetails(const VerificationResult &res, co
     return details;
 }
 
+static QString formatRecipientsDetails(const std::vector<Key> &knownRecipients, unsigned int numRecipients)
+{
+    if (numRecipients == 0) {
+        return {};
+    }
+
+    if (knownRecipients.empty()) {
+        return QLatin1String("<i>") +
+               i18np("One unknown recipient.", "%1 unknown recipients.", numRecipients) +
+               QLatin1String("</i>");
+    }
+
+    QString details = i18np("Recipient:", "Recipients:", numRecipients);
+
+    if (numRecipients == 1) {
+        details += QLatin1Char(' ') + renderKey(knownRecipients.front());
+    } else {
+        details += QLatin1String("<ul>");
+        for (const Key &key : knownRecipients) {
+            details += QLatin1String("<li>") + renderKey(key) + QLatin1String("</li>");
+        }
+        if (knownRecipients.size() < numRecipients) {
+            details += QLatin1String("<li><i>") +
+                       i18np("One unknown recipient", "%1 unknown recipients",
+                             numRecipients - knownRecipients.size()) +
+                       QLatin1String("</i></li>");
+        }
+        details += QLatin1String("</ul>");
+    }
+
+    return details;
+}
+
 static QString formatDecryptionResultDetails(const DecryptionResult &res, const std::vector<Key> &recipients,
                                              const QString &errorString, bool isSigned, const QPointer<Task> &task)
 {
-    QString details;
-
     if ((res.error().code() == GPG_ERR_EIO || res.error().code() == GPG_ERR_NO_DATA) && !errorString.isEmpty()) {
         return i18n("Input error: %1", errorString);
     }
 
-    if (Kleo::gpgComplianceP("de-vs")) {
-        details += ((IS_DE_VS(res)
+    if (res.isNull() || res.error() || res.error().isCanceled()) {
+        return formatRecipientsDetails(recipients, res.numRecipients());
+    }
+
+    QString details;
+
+    if (DeVSCompliance::isCompliant()) {
+        details += ((res.isDeVs()
                      ? i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                             "The decryption is %1.", Formatting::deVsString())
+                             "The decryption is %1.", DeVSCompliance::name(true))
                      : i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                             "The decryption <b>is not</b> %1."), Formatting::deVsString())
+                             "The decryption <b>is not</b> %1.", DeVSCompliance::name(true)))
                     + QStringLiteral("<br/>"));
     }
 
@@ -555,15 +596,9 @@ static QString formatDecryptionResultDetails(const DecryptionResult &res, const 
         }
     }
 
-    if (res.isNull() || !res.error() || res.error().isCanceled()) {
-        if (!isSigned) {
-            return details + i18n("<b>Note:</b> You cannot be sure who encrypted this message as it is not signed.");
-        }
-        return details;
-    }
-
-    if (recipients.empty() && res.numRecipients() > 0) {
-        return details + QLatin1String("<i>") + i18np("One unknown recipient.", "%1 unknown recipients.", res.numRecipients()) + QLatin1String("</i>");
+    if (!isSigned) {
+        details += i18n("<b>Note:</b> You cannot be sure who encrypted this message as it is not signed.")
+                   + QLatin1String("<br/>");
     }
 
     if (res.isLegacyCipherNoMDC()) {
@@ -576,22 +611,7 @@ static QString formatDecryptionResultDetails(const DecryptionResult &res, const 
                    QStringLiteral("<br/><br/>");
     }
 
-    if (!recipients.empty()) {
-        details += i18np("Recipient:", "Recipients:", res.numRecipients());
-        if (res.numRecipients() == 1) {
-            return details + QLatin1Char(' ') + renderKey(recipients.front());
-        }
-
-        details += QLatin1String("<ul>");
-        for (const Key &key : recipients) {
-            details += QLatin1String("<li>") + renderKey(key) + QLatin1String("</li>");
-        }
-        if (recipients.size() < res.numRecipients())
-            details += QLatin1String("<li><i>") + i18np("One unknown recipient", "%1 unknown recipients",
-                       res.numRecipients() - recipients.size()) + QLatin1String("</i></li>");
-
-        details += QLatin1String("</ul>");
-    }
+    details += formatRecipientsDetails(recipients, res.numRecipients());
 
     return details;
 }
@@ -628,7 +648,8 @@ public:
             const VerificationResult &vr,
             const DecryptionResult &dr,
             const QByteArray &stuff,
-            int errCode,
+            const QString &fileName,
+            const GpgME::Error &error,
             const QString &errString,
             const QString &input,
             const QString &output,
@@ -641,7 +662,8 @@ public:
         m_verificationResult(vr),
         m_decryptionResult(dr),
         m_stuff(stuff),
-        m_error(errCode),
+        m_fileName(fileName),
+        m_error(error),
         m_errorString(errString),
         m_inputLabel(input),
         m_outputLabel(output),
@@ -674,7 +696,8 @@ public:
     VerificationResult m_verificationResult;
     DecryptionResult m_decryptionResult;
     QByteArray m_stuff;
-    int m_error;
+    QString m_fileName;
+    GpgME::Error m_error;
     QString m_errorString;
     QString m_inputLabel;
     QString m_outputLabel;
@@ -695,7 +718,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptResul
             VerificationResult(),
             dr,
             plaintext,
-            0,
+            {},
+            {},
             QString(),
             inputLabel(),
             outputLabel(),
@@ -711,7 +735,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptResul
             VerificationResult(),
             DecryptionResult(err),
             QByteArray(),
-            err.code(),
+            {},
+            err,
             what,
             inputLabel(),
             outputLabel(),
@@ -720,14 +745,15 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptResul
             informativeSender()));
 }
 
-std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptVerifyResult(const DecryptionResult &dr, const VerificationResult &vr, const QByteArray &plaintext, const AuditLog &auditLog)
+std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptVerifyResult(const DecryptionResult &dr, const VerificationResult &vr, const QByteArray &plaintext, const QString &fileName, const AuditLog &auditLog)
 {
-    int err = dr.error() ? dr.error().code() : vr.error().code();
+    const auto err = dr.error().code() ? dr.error() : vr.error();
     return std::shared_ptr<DecryptVerifyResult>(new DecryptVerifyResult(
             DecryptVerify,
             vr,
             dr,
             plaintext,
+            fileName,
             err,
             QString(),
             inputLabel(),
@@ -744,7 +770,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromDecryptVerif
             VerificationResult(),
             DecryptionResult(err),
             QByteArray(),
-            err.code(),
+            {},
+            err,
             details,
             inputLabel(),
             outputLabel(),
@@ -760,7 +787,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromVerifyOpaque
             vr,
             DecryptionResult(),
             plaintext,
-            0,
+            {},
+            {},
             QString(),
             inputLabel(),
             outputLabel(),
@@ -775,7 +803,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromVerifyOpaque
             VerificationResult(err),
             DecryptionResult(),
             QByteArray(),
-            err.code(),
+            {},
+            err,
             details,
             inputLabel(),
             outputLabel(),
@@ -791,7 +820,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromVerifyDetach
             vr,
             DecryptionResult(),
             QByteArray(),
-            0,
+            {},
+            {},
             QString(),
             inputLabel(),
             outputLabel(),
@@ -806,7 +836,8 @@ std::shared_ptr<DecryptVerifyResult> AbstractDecryptVerifyTask::fromVerifyDetach
             VerificationResult(err),
             DecryptionResult(),
             QByteArray(),
-            err.code(),
+            {},
+            err,
             details,
             inputLabel(),
             outputLabel(),
@@ -819,14 +850,15 @@ DecryptVerifyResult::DecryptVerifyResult(DecryptVerifyOperation type,
         const VerificationResult &vr,
         const DecryptionResult &dr,
         const QByteArray &stuff,
-        int errCode,
+        const QString &fileName,
+        const GpgME::Error &error,
         const QString &errString,
         const QString &inputLabel,
         const QString &outputLabel,
         const AuditLog &auditLog,
         Task *parentTask,
         const Mailbox &informativeSender)
-    : Task::Result(), d(new Private(type, vr, dr, stuff, errCode, errString, inputLabel, outputLabel, auditLog, parentTask, informativeSender, this))
+    : Task::Result(), d(new Private(type, vr, dr, stuff, fileName, error, errString, inputLabel, outputLabel, auditLog, parentTask, informativeSender, this))
 {
 }
 
@@ -863,12 +895,7 @@ QString DecryptVerifyResult::details() const
                                             d->m_parentTask);
 }
 
-bool DecryptVerifyResult::hasError() const
-{
-    return d->m_error != 0;
-}
-
-int DecryptVerifyResult::errorCode() const
+GpgME::Error DecryptVerifyResult::error() const
 {
     return d->m_error;
 }
@@ -904,6 +931,11 @@ GpgME::VerificationResult DecryptVerifyResult::verificationResult() const
 GpgME::DecryptionResult DecryptVerifyResult::decryptionResult() const
 {
     return d->m_decryptionResult;
+}
+
+QString DecryptVerifyResult::fileName() const
+{
+    return d->m_fileName;
 }
 
 class AbstractDecryptVerifyTask::Private
@@ -992,7 +1024,7 @@ void DecryptVerifyTask::Private::slotResult(const DecryptionResult &dr, const Ve
         return;
     }
 
-    emitResult(q->fromDecryptVerifyResult(dr, vr, plainText, auditLog));
+    emitResult(q->fromDecryptVerifyResult(dr, vr, plainText, m_output->fileName(), auditLog));
 }
 
 DecryptVerifyTask::DecryptVerifyTask(QObject *parent) : AbstractDecryptVerifyTask(parent), d(new Private(this))

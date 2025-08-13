@@ -58,9 +58,9 @@ public:
 
     QString overview() const override;
     QString details() const override;
-    int errorCode() const override
+    GpgME::Error error() const override
     {
-        return m_error.encodedError();
+        return m_error;
     }
     QString errorString() const override
     {
@@ -133,7 +133,7 @@ public:
 
     QString overview() const override;
     QString details() const override;
-    int errorCode() const override;
+    GpgME::Error error() const override;
     QString errorString() const override;
     VisualCode code() const override;
     AuditLog auditLog() const override;
@@ -222,7 +222,7 @@ static QString makeResultDetails(const SigningResult &result, const QString &inp
         }
     }
 
-    if (err) {
+    if (err || err.isCanceled()) {
         return QString::fromLocal8Bit(err.asString()).toHtmlEscaped();
     }
     return QString();
@@ -239,7 +239,7 @@ static QString makeResultDetails(const EncryptionResult &result, const QString &
         }
     }
 
-    if (err) {
+    if (err || err.isCanceled()) {
         return QString::fromLocal8Bit(err.asString()).toHtmlEscaped();
     }
     return i18n(" Encryption succeeded.");
@@ -468,6 +468,11 @@ void SignEncryptTask::doStart()
         if (d->sign) {
             std::unique_ptr<QGpgME::SignEncryptJob> job = d->createSignEncryptJob(protocol());
             kleo_assert(job.get());
+#ifdef QGPGME_SUPPORTS_SET_FILENAME
+            if (d->inputFileNames.size() == 1) {
+                job->setFileName(d->inputFileNames.front());
+            }
+#endif
 
             job->start(d->signers, d->recipients,
                        d->input->ioDevice(), d->output->ioDevice(), flags);
@@ -476,6 +481,11 @@ void SignEncryptTask::doStart()
         } else {
             std::unique_ptr<QGpgME::EncryptJob> job = d->createEncryptJob(protocol());
             kleo_assert(job.get());
+#ifdef QGPGME_SUPPORTS_SET_FILENAME
+            if (d->inputFileNames.size() == 1) {
+                job->setFileName(d->inputFileNames.front());
+            }
+#endif
 
             job->start(d->recipients, d->input->ioDevice(), d->output->ioDevice(), flags);
 
@@ -636,15 +646,15 @@ QString SignEncryptFilesResult::details() const
     return errorString();
 }
 
-int SignEncryptFilesResult::errorCode() const
+GpgME::Error SignEncryptFilesResult::error() const
 {
     if (m_sresult.error().code()) {
-        return m_sresult.error().encodedError();
+        return m_sresult.error();
     }
     if (m_eresult.error().code()) {
-        return m_eresult.error().encodedError();
+        return m_eresult.error();
     }
-    return 0;
+    return {};
 }
 
 QString SignEncryptFilesResult::errorString() const

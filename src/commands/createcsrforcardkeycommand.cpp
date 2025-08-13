@@ -23,6 +23,7 @@
 
 #include "utils/filedialog.h"
 #include "utils/keyparameters.h"
+#include "utils/keyusage.h"
 
 #include <Libkleo/Formatting>
 
@@ -61,7 +62,7 @@ class CreateCSRForCardKeyCommand::Private : public CardCommand::Private
 public:
     explicit Private(CreateCSRForCardKeyCommand *qq,
                      const std::string &keyRef, const std::string &serialNumber, const std::string &appName, QWidget *parent);
-    ~Private();
+    ~Private() override;
 
 private:
     void start();
@@ -77,7 +78,7 @@ private:
 private:
     std::string appName;
     std::string keyRef;
-    QStringList keyUsages;
+    KeyUsage keyUsage;
     QPointer<CreateCSRForCardKeyDialog> dialog;
 };
 
@@ -107,20 +108,20 @@ CreateCSRForCardKeyCommand::Private::~Private()
 
 namespace
 {
-QStringList getKeyUsages(const KeyPairInfo &keyInfo)
+KeyUsage getKeyUsage(const KeyPairInfo &keyInfo)
 {
     // note: gpgsm does not support creating CSRs for authentication certificates
-    QStringList usages;
+    KeyUsage usage;
     if (keyInfo.canCertify()) {
-        usages.push_back(QStringLiteral("cert"));
+        usage.setCanCertify(true);
     }
     if (keyInfo.canSign()) {
-        usages.push_back(QStringLiteral("sign"));
+        usage.setCanSign(true);
     }
     if (keyInfo.canEncrypt()) {
-        usages.push_back(QStringLiteral("encrypt"));
+        usage.setCanEncrypt(true);
     }
-    return usages;
+    return usage;
 }
 }
 
@@ -140,7 +141,7 @@ void CreateCSRForCardKeyCommand::Private::start()
     }
 
     const KeyPairInfo &keyInfo = card->keyInfo(keyRef);
-    keyUsages = getKeyUsages(keyInfo);
+    keyUsage = getKeyUsage(keyInfo);
 
     ensureDialogCreated();
 
@@ -174,18 +175,18 @@ void CreateCSRForCardKeyCommand::Private::slotDialogAccepted()
 
     Job::context(job)->setArmor(true);
 
-    connect(job, SIGNAL(result(const GpgME::KeyGenerationResult &, const QByteArray &)),
-            q, SLOT(slotResult(const GpgME::KeyGenerationResult &, const QByteArray &)));
+    connect(job, &KeyGenerationJob::result, q, [this](const GpgME::KeyGenerationResult &result, const QByteArray &pubKeyData) {
+        slotResult(result, pubKeyData);
+    });
 
     KeyParameters keyParameters(KeyParameters::CMS);
-    keyParameters.setKeyType(QString::fromStdString(keyRef));
-    keyParameters.setKeyUsages(keyUsages);
+    keyParameters.setCardKeyRef(QString::fromStdString(keyRef));
+    keyParameters.setKeyUsage(keyUsage);
     keyParameters.setDN(dialog->dn());
     keyParameters.setEmail(dialog->email());
 
     if (const Error err = job->start(keyParameters.toString())) {
-        error(i18nc("@info", "Creating a CSR for the card key failed:\n%1", QString::fromUtf8(err.asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Creating a CSR for the card key failed:\n%1", QString::fromUtf8(err.asString())));
         finished();
     }
 }
@@ -200,8 +201,7 @@ void CreateCSRForCardKeyCommand::Private::slotResult(const KeyGenerationResult &
     if (result.error().isCanceled()) {
         // do nothing
     } else if (result.error()) {
-        error(i18nc("@info", "Creating a CSR for the card key failed:\n%1", QString::fromUtf8(result.error().asString())),
-              i18nc("@title", "Error"));
+        error(i18nc("@info", "Creating a CSR for the card key failed:\n%1", QString::fromUtf8(result.error().asString())));
     } else {
         const QUrl url = saveRequest(request);
         if (!url.isEmpty()) {
@@ -268,8 +268,8 @@ void CreateCSRForCardKeyCommand::Private::ensureDialogCreated()
     applyWindowID(dialog);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
 
-    connect(dialog, SIGNAL(accepted()), q, SLOT(slotDialogAccepted()));
-    connect(dialog, SIGNAL(rejected()), q, SLOT(slotDialogRejected()));
+    connect(dialog, &QDialog::accepted, q, [this]() { slotDialogAccepted(); });
+    connect(dialog, &QDialog::rejected, q, [this]() { slotDialogRejected(); });
 }
 
 CreateCSRForCardKeyCommand::CreateCSRForCardKeyCommand(const std::string &keyRef, const std::string &serialNumber, const std::string &appName, QWidget *parent)

@@ -14,7 +14,8 @@
 
 #include "signingcertificateselectiondialog.h"
 
-#include <crypto/certificateresolver.h>
+#include "crypto/certificateresolver.h"
+#include "utils/keys.h"
 
 #include <Libkleo/KeyCache>
 #include <Libkleo/Formatting>
@@ -36,7 +37,6 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QVBoxLayout>
-#include <QVector>
 
 using namespace GpgME;
 using namespace Kleo;
@@ -105,12 +105,12 @@ bool ReadOnlyProtocolSelectionWidget::isProtocolChecked(Protocol protocol) const
 std::set<Protocol> ReadOnlyProtocolSelectionWidget::checkedProtocols() const
 {
     std::set<Protocol> res;
-    Q_FOREACH (const Protocol i, supportedProtocols())  //krazy:exclude=foreach
+    for (const Protocol i : supportedProtocols()) {
         if (isProtocolChecked(i)) {
             res.insert(i);
         }
+    }
     return res;
-
 }
 
 SigningProtocolSelectionWidget::SigningProtocolSelectionWidget(QWidget *parent, Qt::WindowFlags f)
@@ -122,7 +122,7 @@ SigningProtocolSelectionWidget::SigningProtocolSelectionWidget(QWidget *parent, 
 
     auto const layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    Q_FOREACH (const Protocol i, supportedProtocols()) {   //krazy:exclude=foreach
+    for (const Protocol i : supportedProtocols()) {
         auto const b = new QCheckBox;
         b->setText(formatLabel(i, Key()));
         m_buttons[i] = b;
@@ -231,7 +231,7 @@ public:
     void setOperation(Operation operation);
     void operationButtonClicked(int operation);
     void selectCertificates();
-    void setCertificates(const QMap<GpgME::Protocol, GpgME::Key> &certs);
+    void setCertificates(const CertificatePair &certs);
     void updateModeSelectionWidgets();
     void updateUi();
     bool protocolSelected(Protocol p) const;
@@ -257,7 +257,7 @@ private:
     bool encryptionSelected;
     bool multipleProtocolsAllowed;
     bool protocolSelectionUserMutable;
-    QMap<GpgME::Protocol, GpgME::Key> certificates;
+    CertificatePair certificates;
     std::shared_ptr<SignerResolvePage::Validator> validator;
     std::shared_ptr<SigningPreferences> signingPreferences;
 };
@@ -357,14 +357,13 @@ bool SignerResolvePage::Private::protocolSelected(Protocol p) const
     return signingProtocolSelectionWidget->isProtocolChecked(p);
 }
 
-void SignerResolvePage::Private::setCertificates(const QMap<GpgME::Protocol, GpgME::Key> &certs)
+void SignerResolvePage::Private::setCertificates(const CertificatePair &certs)
 {
     certificates = certs;
-    Q_FOREACH (const Protocol i, certs.keys()) {   //krazy:exclude=foreach
-        const Key key = certs.value(i);
-        readOnlyProtocolSelectionWidget->setCertificate(i, key);
-        signingProtocolSelectionWidget->setCertificate(i, key);
-    }
+    readOnlyProtocolSelectionWidget->setCertificate(GpgME::OpenPGP, certs.openpgp);
+    signingProtocolSelectionWidget->setCertificate(GpgME::OpenPGP, certs.openpgp);
+    readOnlyProtocolSelectionWidget->setCertificate(GpgME::CMS, certs.cms);
+    signingProtocolSelectionWidget->setCertificate(GpgME::CMS, certs.cms);
     updateUi();
 }
 
@@ -442,11 +441,11 @@ void SignerResolvePage::Private::selectCertificates()
     QPointer<SigningCertificateSelectionDialog> dlg = new SigningCertificateSelectionDialog(q);
     dlg->setAllowedProtocols(signingProtocolSelectionWidget->checkedProtocols());
     if (dlg->exec() == QDialog::Accepted && dlg) {
-        const QMap<Protocol, Key> certs = dlg->selectedCertificates();
+        const auto certs = dlg->selectedCertificates();
         setCertificates(certs);
         if (signingPreferences && dlg->rememberAsDefault()) {
-            signingPreferences->setPreferredCertificate(OpenPGP, certs.value(OpenPGP));
-            signingPreferences->setPreferredCertificate(CMS, certs.value(CMS));
+            signingPreferences->setPreferredCertificate(OpenPGP, certs.openpgp);
+            signingPreferences->setPreferredCertificate(CMS, certs.cms);
         }
     }
 
@@ -494,7 +493,7 @@ SignerResolvePage::SignerResolvePage(QWidget *parent, Qt::WindowFlags f)
     setTitle(i18n("<b>Choose Operation to be Performed</b>"));
 //    setSubTitle( i18n( "TODO" ) );
     setPresetProtocol(UnknownProtocol);
-    d->setCertificates(QMap<GpgME::Protocol, GpgME::Key>());
+    d->setCertificates({});
     d->updateModeSelectionWidgets();
     d->operationButtonClicked(EncryptOnly);
 }
@@ -538,7 +537,7 @@ void SignerResolvePage::setPresetProtocol(Protocol protocol)
 void SignerResolvePage::setPresetProtocols(const std::vector<Protocol> &protocols)
 {
     d->presetProtocols = protocols;
-    Q_FOREACH (const Protocol i, supportedProtocols()) {   //krazy:exclude=foreach
+    for (const Protocol i : supportedProtocols()) {
         const bool checked = std::find(protocols.begin(), protocols.end(), i) != protocols.end();
         d->signingProtocolSelectionWidget->setProtocolChecked(i, checked);
         d->readOnlyProtocolSelectionWidget->setProtocolChecked(i, checked);
@@ -554,11 +553,11 @@ std::set<Protocol> SignerResolvePage::selectedProtocols() const
 std::vector<Key> SignerResolvePage::signingCertificates(Protocol protocol) const
 {
     std::vector<Key> result;
-    if (protocol != CMS && d->signingProtocolSelectionWidget->isProtocolChecked(OpenPGP) && !d->certificates[OpenPGP].isNull()) {
-        result.push_back(d->certificates[OpenPGP]);
+    if (protocol != CMS && d->signingProtocolSelectionWidget->isProtocolChecked(OpenPGP) && !d->certificates.openpgp.isNull()) {
+        result.push_back(d->certificates.openpgp);
     }
-    if (protocol != OpenPGP && d->signingProtocolSelectionWidget->isProtocolChecked(CMS) && !d->certificates[CMS].isNull()) {
-        result.push_back(d->certificates[CMS]);
+    if (protocol != OpenPGP && d->signingProtocolSelectionWidget->isProtocolChecked(CMS) && !d->certificates.cms.isNull()) {
+        result.push_back(d->certificates.cms);
     }
     return result;
 }
@@ -626,10 +625,11 @@ void SignerResolvePage::setSigningUserMutable(bool ismutable)
 std::set<Protocol> SignerResolvePage::selectedProtocolsWithoutSigningCertificate() const
 {
     std::set<Protocol> res;
-    Q_FOREACH (const Protocol i, selectedProtocols())   //krazy:exclude=foreach
+    for (const Protocol i : selectedProtocols()) {
         if (signingCertificates(i).empty()) {
             res.insert(i);
         }
+    }
     return res;
 }
 
@@ -646,10 +646,11 @@ void SignerResolvePage::setAsciiArmorEnabled(bool enabled)
 void SignerResolvePage::setSigningPreferences(const std::shared_ptr<SigningPreferences> &prefs)
 {
     d->signingPreferences = prefs;
-    QMap<Protocol, Key> map;
-    map[OpenPGP] = prefs ? prefs->preferredCertificate(OpenPGP) : Key();
-    map[CMS] = prefs ? prefs->preferredCertificate(CMS) : Key();
-    d->setCertificates(map);
+    const CertificatePair certs = {
+        prefs ? prefs->preferredCertificate(OpenPGP) : Key(),
+        prefs ? prefs->preferredCertificate(CMS) : Key()
+    };
+    d->setCertificates(certs);
 }
 
 std::shared_ptr<SigningPreferences> SignerResolvePage::signingPreferences() const

@@ -12,8 +12,9 @@
 
 #include "genrevokecommand.h"
 
-#include <Libkleo/GnuPG>
+#include <utils/applicationstate.h>
 
+#include <Libkleo/GnuPG>
 #include <Libkleo/Formatting>
 
 #include <gpgme++/key.h>
@@ -26,8 +27,9 @@
 #include <QFile>
 #include <QFileDialog>
 
-#include "kleopatra_debug.h"
 #include "command_p.h"
+#include "kleopatra_debug.h"
+#include <kwidgetsaddons_version.h>
 
 using namespace Kleo;
 using namespace Kleo::Commands;
@@ -100,10 +102,14 @@ void GenRevokeCommand::postSuccessHook(QWidget *parentWidget)
 /* Well not much to do with GnuPGProcessCommand anymore I guess.. */
 void GenRevokeCommand::doStart()
 {
+    auto proposedFileName = ApplicationState::lastUsedExportDirectory() + u'/' + QString::fromLatin1(d->key().primaryFingerprint()) + QLatin1String{".rev"};
     while (mOutputFileName.isEmpty()) {
-        mOutputFileName = QFileDialog::getSaveFileName(d->parentWidgetOrView(), i18n("Generate revocation certificate"),
-                                                       QString(),
-                                                       QStringLiteral("%1 (*.rev)").arg(i18n("Revocation Certificates ")));
+        mOutputFileName = QFileDialog::getSaveFileName(d->parentWidgetOrView(),
+                                                       i18n("Generate revocation certificate"),
+                                                       proposedFileName,
+                                                       QStringLiteral("%1 (*.rev)").arg(i18n("Revocation Certificates ")),
+                                                       {},
+                                                       QFileDialog::DontConfirmOverwrite);
         if (mOutputFileName.isEmpty()) {
             d->finished();
             return;
@@ -111,21 +117,34 @@ void GenRevokeCommand::doStart()
         if (!mOutputFileName.endsWith(QLatin1String(".rev"))) {
             mOutputFileName += QLatin1String(".rev");
         }
-        if (QFileInfo(mOutputFileName).exists()) {
-            auto sel = KMessageBox::questionYesNo(d->parentWidgetOrView(), i18n("The file <b>%1</b> already exists.\n"
-                                                  "Overwrite?", mOutputFileName),
-                                                  i18n("Overwrite Existing File?"));
+        const QFileInfo fi{mOutputFileName};
+        if (fi.exists()) {
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+            auto sel = KMessageBox::questionTwoActions(d->parentWidgetOrView(),
+#else
+            auto sel = KMessageBox::questionYesNo(d->parentWidgetOrView(),
+#endif
+                                                       xi18n("The file <filename>%1</filename> already exists. Do you wish to overwrite it?", fi.fileName()),
+                                                       i18nc("@title:window", "Overwrite File?"),
+                                                       KStandardGuiItem::overwrite(),
+                                                       KStandardGuiItem::cancel(),
+                                                       {},
+                                                       KMessageBox::Notify | KMessageBox::Dangerous);
+#if KWIDGETSADDONS_VERSION >= QT_VERSION_CHECK(5, 100, 0)
+            if (sel == KMessageBox::ButtonCode::SecondaryAction) {
+#else
             if (sel == KMessageBox::No) {
-                mOutputFileName = QString();
+#endif
+                proposedFileName = mOutputFileName;
+                mOutputFileName.clear();
             }
         }
     }
-
+    ApplicationState::setLastUsedExportDirectory(mOutputFileName);
 
     auto proc = process();
     // We do custom io
-    disconnect(proc, SIGNAL(readyReadStandardError()),
-               this, SLOT(slotProcessReadyReadStandardError()));
+    disconnect(m_procReadyReadStdErrConnection);
     proc->setReadChannel(QProcess::StandardOutput);
 
     GnuPGProcessCommand::doStart();

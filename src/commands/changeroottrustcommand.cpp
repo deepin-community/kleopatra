@@ -13,14 +13,13 @@
 #include "command_p.h"
 
 #include <Libkleo/KeyCache>
-
+#include <Libkleo/Dn>
 #include <Libkleo/GnuPG>
 
 #include "kleopatra_debug.h"
 #include <KLocalizedString>
 #include <QSaveFile>
 
-#include <QRegExp>
 #include <QThread>
 #include <QMutex>
 #include <QMutexLocker>
@@ -62,7 +61,7 @@ private:
     void init()
     {
         q->setWarnWhenRunningAtShutdown(false);
-        connect(this, SIGNAL(finished()), q_func(), SLOT(slotOperationFinished()));
+        connect(this, &QThread::finished, this, &ChangeRootTrustCommand::Private::slotOperationFinished);
     }
 
     void run() override;
@@ -183,7 +182,7 @@ void ChangeRootTrustCommand::doCancel()
     d->canceled = true;
 }
 
-static QString change_trust_file(const QString &trustListFile, const QString &key, Key::OwnerTrust trust);
+static QString change_trust_file(const QString &trustListFile, const QString &fingerprint, const DN &dn, Key::OwnerTrust trust);
 static QString run_gpgconf_reload_gpg_agent(const QString &gpgConfPath);
 
 void ChangeRootTrustCommand::Private::run()
@@ -191,14 +190,16 @@ void ChangeRootTrustCommand::Private::run()
 
     QMutexLocker locker(&mutex);
 
-    const QString key = QString::fromLatin1(keys().front().primaryFingerprint());
+    const auto key = keys().front();
+    const QString fpr = QString::fromLatin1(key.primaryFingerprint());
+    const auto dn = DN(key.userID(0).id());
     const Key::OwnerTrust trust = this->trust;
     const QString trustListFile = this->trustListFile;
     const QString gpgConfPath   = this->gpgConfPath;
 
     locker.unlock();
 
-    QString err = change_trust_file(trustListFile, key, trust);
+    QString err = change_trust_file(trustListFile, fpr, dn, trust);
     if (err.isEmpty()) {
         err = run_gpgconf_reload_gpg_agent(gpgConfPath);
     }
@@ -236,7 +237,7 @@ class KFixedSaveFile : public QSaveFile
 public:
     explicit KFixedSaveFile(const QString &fileName)
         : QSaveFile(fileName) {}
-    ~KFixedSaveFile()
+    ~KFixedSaveFile() override
     {
         cancelWriting();
     }
@@ -246,21 +247,43 @@ public:
 }
 
 // static
-QString change_trust_file(const QString &trustListFile, const QString &key, Key::OwnerTrust trust)
+QString change_trust_file(const QString &trustListFile, const QString &key, const DN &dn, Key::OwnerTrust trust)
 {
     QList<QByteArray> trustListFileContents;
 
-    {
-        QFile in(trustListFile);
-        if (in.exists()) {  // non-existence is not fatal...
-            if (in.open(QIODevice::ReadOnly)) {
-                trustListFileContents = in.readAll().split('\n');
-            } else { // ...but failure to open an existing file _is_
-                return i18n("Cannot open existing file \"%1\" for reading: %2",
-                            trustListFile, in.errorString());
+    if (QFile::exists(trustListFile)) {  // non-existence is not fatal...
+        if (QFile in(trustListFile); in.open(QIODevice::ReadOnly)) {
+            trustListFileContents = in.readAll().split('\n');
+            // remove last empty line to avoid adding more empty lines when we write the lines
+            if (!trustListFileContents.empty() && trustListFileContents.back().isEmpty()) {
+                trustListFileContents.pop_back();
             }
+        } else { // ...but failure to open an existing file _is_
+            return i18n("Cannot open existing file \"%1\" for reading: %2",
+                        trustListFile, in.errorString());
         }
-        // close, so KSaveFile doesn't clobber the original
+        // the file is now closed, so KSaveFile doesn't clobber the original
+    } else {
+        // the default contents of the trustlist.txt file (see the headerblurb variable in trustlist.c of gnupg);
+        // we add an additional comment about the "include-default" statement
+        trustListFileContents = {
+            "# This is the list of trusted keys.  Comment lines, like this one, as",
+            "# well as empty lines are ignored.  Lines have a length limit but this",
+            "# is not a serious limitation as the format of the entries is fixed and",
+            "# checked by gpg-agent.  A non-comment line starts with optional white",
+            "# space, followed by the SHA-1 fingerpint in hex, followed by a flag",
+            "# which may be one of 'P', 'S' or '*' and optionally followed by a list of",
+            "# other flags.  The fingerprint may be prefixed with a '!' to mark the",
+            "# key as not trusted.  You should give the gpg-agent a HUP or run the",
+            "# command \"gpgconf --reload gpg-agent\" after changing this file.",
+            "# Additionally to this file, gpg-agent will read the default trust list file",
+            "# if the statement \"include-default\" is used below.",
+            "",
+            "",
+            "# Include the default trust list",
+            "include-default",
+            "",
+        };
     }
 
     KFixedSaveFile out(trustListFile);
@@ -276,19 +299,21 @@ QString change_trust_file(const QString &trustListFile, const QString &key, Key:
 
     qCDebug(KLEOPATRA_LOG) << qPrintable(key) << " -> " << qPrintable(keyColon);
 
-    //               ( 1)    (                         2                           )    (  3  )( 4)
-    QRegExp rx(QLatin1String("\\s*(!?)\\s*([a-fA-F0-9]{40}|(?:[a-fA-F0-9]{2}:){19}[a-fA-F0-9]{2})\\s*([SsPp*])(.*)"));
+    //                                       ( 1)   (                         2                           )   (  3    )( 4)
+    static const char16_t pattern[] = uR"(\s*(!?)\s*([a-fA-F0-9]{40}|(?:[a-fA-F0-9]{2}:){19}[a-fA-F0-9]{2})\s*([SsPp*])(.*))";
+    static const QRegularExpression rx(QRegularExpression::anchoredPattern(pattern));
     bool found = false;
 
     for (const QByteArray &rawLine : std::as_const(trustListFileContents)) {
 
         const QString line = QString::fromLatin1(rawLine.data(), rawLine.size());
-        if (!rx.exactMatch(line)) {
+        const QRegularExpressionMatch match = rx.match(line);
+        if (!match.hasMatch()) {
             qCDebug(KLEOPATRA_LOG) << "line \"" << rawLine.data() << "\" does not match";
             out.write(rawLine + '\n');
             continue;
         }
-        const QString cap2 = rx.cap(2);
+        const QString cap2 = match.captured(2);
         if (cap2 != key && cap2 != keyColon) {
             qCDebug(KLEOPATRA_LOG) << qPrintable(key) << " != "
                                    << qPrintable(cap2) << " != "
@@ -297,9 +322,9 @@ QString change_trust_file(const QString &trustListFile, const QString &key, Key:
             continue;
         }
         found = true;
-        const bool disabled = rx.cap(1) == QLatin1Char('!');
-        const QByteArray flags = rx.cap(3).toLatin1();
-        const QByteArray rests = rx.cap(4).toLatin1();
+        const bool disabled = match.capturedView(1) == QLatin1Char('!');
+        const QByteArray flags = match.captured(3).toLatin1();
+        const QByteArray rests = match.captured(4).toLatin1();
         if (trust == Key::Ultimate)
             if (!disabled) { // unchanged
                 out.write(rawLine + '\n');
@@ -318,10 +343,15 @@ QString change_trust_file(const QString &trustListFile, const QString &key, Key:
     }
 
     if (!found) {  // add
+        out.write("\n");
+        // write comment lines with DN attributes
+        std::for_each(dn.begin(), dn.end(), [&out](const auto &attr) {
+            out.write("# " + attr.name().toUtf8() + "=" + attr.value().toUtf8() + '\n');
+        });
         if (trust == Key::Ultimate) {
-            out.write(keyColon.toLatin1() + ' ' + 'S' + '\n');
+            out.write(keyColon.toLatin1() + " S relax\n");
         } else if (trust == Key::Never) {
-            out.write('!' + keyColon.toLatin1() + ' ' + 'S' + '\n');
+            out.write('!' + keyColon.toLatin1() + " S relax\n");
         }
     }
 

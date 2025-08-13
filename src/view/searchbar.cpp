@@ -3,6 +3,8 @@
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2007 Klarälvdalens Datakonsult AB
+    SPDX-FileCopyrightText: 2022 g10 Code GmbH
+    SPDX-FileContributor: Ingo Klöcker <dev@ingo-kloecker.de>
 
     SPDX-License-Identifier: GPL-2.0-or-later
 */
@@ -11,21 +13,22 @@
 
 #include "searchbar.h"
 
+#include <Libkleo/Algorithm>
+#include <Libkleo/KeyCache>
 #include <Libkleo/KeyFilter>
 #include <Libkleo/KeyFilterManager>
 
 #include <KLocalizedString>
-#include <QLineEdit>
 
+#include <QLineEdit>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 
-#include <Libkleo/GnuPG>
-#include <qgpgme/keylistjob.h>
-#include <qgpgme/protocol.h>
-#include <gpgme++/keylistresult.h>
+#include <gpgme++/key.h>
+
+#include "kleopatra_debug.h"
 
 using namespace Kleo;
 
@@ -84,33 +87,37 @@ private:
         }
     }
 
+    static auto notCertifiedKeysFilterId()
+    {
+        static const QString filterId = QStringLiteral("not-certified-certificates");
+        return filterId;
+    }
+
     void listNotCertifiedKeys() const
     {
         lineEdit->clear();
-        combo->setCurrentIndex(combo->findData(QStringLiteral("not-validated-certificates")));
+        combo->setCurrentIndex(combo->findData(notCertifiedKeysFilterId()));
         Q_EMIT q->keyFilterChanged(keyFilter(combo->currentIndex()));
     }
 
-    /* List all OpenPGP keys and see if we find one with a UID that is
-     * not at least fully valid.  If we find one, show the certify
-     * button.  */
-    /* XXX: It would be nice to do this every time the user certifies
-     * a key.  */
     void showOrHideCertifyButton() const
     {
-        QGpgME::KeyListJob *job = QGpgME::openpgp()->keyListJob();
-        connect(job, &QGpgME::KeyListJob::result, job,
-                [this](const GpgME::KeyListResult&, const std::vector<GpgME::Key> &keys, const QString&, const GpgME::Error&)
-                {
-                    for (const auto &key: keys) {
-                        if (Kleo::keyValidity(key) < GpgME::UserID::Validity::Full) {
-                            certifyButton->show();
-                            return;
-                        }
-                    }
-                    certifyButton->hide();
-                });
-        job->start(QStringList());
+        if (!KeyCache::instance()->initialized()) {
+            return;
+        }
+        const auto filter = KeyFilterManager::instance()->keyFilterByID(notCertifiedKeysFilterId());
+        if (filter) {
+            if (Kleo::any_of(KeyCache::instance()->keys(),
+                             [filter](const auto &key) {
+                                 return filter->matches(key, KeyFilter::Filtering);
+                             })) {
+                certifyButton->show();
+                return;
+            }
+        } else {
+            qCDebug(KLEOPATRA_LOG) << __func__ << "Key filter with id" << notCertifiedKeysFilterId() << "not found";
+        }
+        certifyButton->hide();
     }
 
 private:
@@ -128,11 +135,16 @@ SearchBar::Private::Private(SearchBar *qq)
     lineEdit = new QLineEdit(q);
     lineEdit->setClearButtonEnabled(true);
     lineEdit->setPlaceholderText(i18n("Search..."));
+    lineEdit->setAccessibleName(i18n("Filter certificates by text"));
+    lineEdit->setToolTip(i18n("Show only certificates that match the entered search term."));
     layout->addWidget(lineEdit, /*stretch=*/1);
     combo = new QComboBox(q);
+    combo->setAccessibleName(i18n("Filter certificates by category"));
+    combo->setToolTip(i18n("Show only certificates that belong to the selected category."));
     layout->addWidget(combo);
     certifyButton = new QPushButton(q);
     certifyButton->setIcon(QIcon::fromTheme(QStringLiteral("security-medium")));
+    certifyButton->setAccessibleName(i18n("Show not certified certificates"));
     certifyButton->setToolTip(i18n("Some certificates are not yet certified. "
                                    "Click here to see a list of these certificates."
                                    "<br/><br/>"
@@ -140,7 +152,6 @@ SearchBar::Private::Private(SearchBar *qq)
                                    "actually belong to the identity they claim to belong to."));
     certifyButton->hide();
     layout->addWidget(certifyButton);
-    showOrHideCertifyButton();
 
     proxyModel = new ProxyModel{q};
     proxyModel->setSourceModel(KeyFilterManager::instance()->model());
@@ -153,8 +164,12 @@ SearchBar::Private::Private(SearchBar *qq)
     KDAB_SET_OBJECT_NAME(certifyButton);
 
     connect(lineEdit, &QLineEdit::textChanged, q, &SearchBar::stringFilterChanged);
-    connect(combo, SIGNAL(currentIndexChanged(int)), q, SLOT(slotKeyFilterChanged(int)));
-    connect(certifyButton, SIGNAL(clicked()), q, SLOT(listNotCertifiedKeys()));
+    connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), q, [this](int index) { slotKeyFilterChanged(index); });
+    connect(certifyButton, &QPushButton::clicked, q, [this]() { listNotCertifiedKeys(); });
+
+    connect(KeyCache::instance().get(), &KeyCache::keyListingDone,
+            q, [this]() { showOrHideCertifyButton(); });
+    showOrHideCertifyButton();
 }
 
 SearchBar::Private::~Private() {}

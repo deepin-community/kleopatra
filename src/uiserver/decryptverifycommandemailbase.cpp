@@ -14,11 +14,11 @@
 #include <crypto/decryptverifytask.h>
 #include <crypto/decryptverifyemailcontroller.h>
 
-#include <utils/hex.h>
 #include <utils/input.h>
 #include <utils/output.h>
 #include <utils/kleo_assert.h>
 
+#include <Libkleo/Hex>
 #include <Libkleo/KleoException>
 #include <Libkleo/KeyCache>
 #include <Libkleo/Formatting>
@@ -51,7 +51,7 @@ public:
     {
     }
 
-    ~Private()
+    ~Private() override
     {
     }
 
@@ -91,10 +91,12 @@ int DecryptVerifyCommandEMailBase::doStart()
     d->controller.reset(new DecryptVerifyEMailController(shared_from_this()));
 
     const QString st = sessionTitle();
-    if (!st.isEmpty())
-        Q_FOREACH (const std::shared_ptr<Input> &i, inputs()) {
+    if (!st.isEmpty()) {
+        const std::vector<std::shared_ptr<Input>> allInputs = inputs();
+        for (const std::shared_ptr<Input> &i : allInputs) {
             i->setLabel(st);
         }
+    }
 
     d->controller->setSessionId(sessionId());
     d->controller->setOperation(operation());
@@ -107,10 +109,8 @@ int DecryptVerifyCommandEMailBase::doStart()
     if (informativeSenders()) {
         d->controller->setInformativeSenders(senders());
     }
-    QObject::connect(d->controller.get(), SIGNAL(done()),
-                     d.get(), SLOT(slotDone()), Qt::QueuedConnection);
-    QObject::connect(d->controller.get(), SIGNAL(error(int,QString)),
-                     d.get(), SLOT(slotError(int,QString)), Qt::QueuedConnection);
+    QObject::connect(d->controller.get(), &Controller::done, d.get(), &Private::slotDone, Qt::QueuedConnection);
+    QObject::connect(d->controller.get(), &Controller::error, d.get(), &Private::slotError, Qt::QueuedConnection);
     QObject::connect(d->controller.get(), &DecryptVerifyEMailController::verificationResult,
                      d.get(), &Private::verificationResult, Qt::QueuedConnection);
 
@@ -200,7 +200,7 @@ void DecryptVerifyCommandEMailBase::Private::verificationResult(const Verificati
 {
     try {
         const std::vector<Signature> sigs = vResult.signatures();
-        Q_FOREACH (const Signature &sig, sigs) {
+        for (const Signature &sig : sigs) {
             const QString s = signatureToString(sig, sig.key(true, true));
             const char *color = summaryToString(sig.summary());
             q->sendStatusEncoded("SIGSTATUS",

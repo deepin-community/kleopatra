@@ -91,7 +91,8 @@ void NewResultPage::Private::allDone()
     m_progressBar->setRange(0, 100);
     m_progressBar->setValue(100);
     m_collections.clear();
-    Q_FOREACH (const QString &i, m_progressLabelByTag.keys()) {
+    const auto progressLabelByTagKeys{m_progressLabelByTag.keys()};
+    for (const QString &i : progressLabelByTagKeys) {
         if (!i.isEmpty()) {
             m_progressLabelByTag.value(i)->setText(i18n("%1: All operations completed.", i));
         } else {
@@ -156,7 +157,7 @@ void NewResultPage::addTaskCollection(const std::shared_ptr<TaskCollection> &col
     connect(coll.get(), SIGNAL(started(std::shared_ptr<Kleo::Crypto::Task>)),
             this, SLOT(started(std::shared_ptr<Kleo::Crypto::Task>)));
 
-    Q_FOREACH (const std::shared_ptr<Task> &i, coll->tasks()) {    // create labels for all tags in collection
+    for (const std::shared_ptr<Task> &i : coll->tasks()) {    // create labels for all tags in collection
         Q_ASSERT(i);
         QLabel *l = d->labelForTag(i->tag());
         Q_ASSERT(l); (void)l;

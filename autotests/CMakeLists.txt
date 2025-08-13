@@ -1,10 +1,39 @@
-set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR})
+# SPDX-FileCopyrightText: none
+# SPDX-License-Identifier: BSD-3-Clause
+
+include(ECMAddTests)
+
+find_package(Qt${QT_MAJOR_VERSION}Test ${REQUIRED_QT_VERSION} CONFIG QUIET)
+
+if(NOT TARGET Qt::Test)
+    message(STATUS "Qt${QT_MAJOR_VERSION}Test not found, autotests will not be built.")
+    return()
+endif()
+
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
-set(kuniqueservicetest_src kuniqueservicetest.cpp ${CMAKE_SOURCE_DIR}/src/utils/kuniqueservice.cpp)
+ecm_qt_declare_logging_category(logging_category_srcs HEADER kleopatra_debug.h IDENTIFIER KLEOPATRA_LOG CATEGORY_NAME org.kde.pim.kleopatra)
 
-ecm_qt_declare_logging_category(kuniqueservicetest_src HEADER kleopatra_debug.h IDENTIFIER KLEOPATRA_LOG CATEGORY_NAME org.kde.pim.kleopatra)
-add_executable(kuniqueservicetest ${kuniqueservicetest_src})
-add_test(NAME kuniqueservicetest COMMAND kuniqueservicetest)
-ecm_mark_as_test(kuniqueservicetest)
-target_link_libraries(kuniqueservicetest Qt::Test ${_kleopatra_dbusaddons_libs})
+ecm_add_test(
+    kuniqueservicetest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/kuniqueservice.cpp
+    ${logging_category_srcs}
+    TEST_NAME kuniqueservicetest
+    LINK_LIBRARIES ${_kleopatra_dbusaddons_libs} Qt::Test
+)
+
+ecm_add_test(
+    stripsuffixtest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/path-helper.cpp
+    ${logging_category_srcs}
+    TEST_NAME stripsuffixtest
+    LINK_LIBRARIES KF5::I18n KF5::Libkleo Qt::Test
+)
+
+ecm_add_test(
+    keyparameterstest.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/keyparameters.cpp
+    ${logging_category_srcs}
+    TEST_NAME keyparameterstest
+    LINK_LIBRARIES Gpgmepp Qt::Test
+)

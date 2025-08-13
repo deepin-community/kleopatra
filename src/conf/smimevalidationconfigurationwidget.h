@@ -23,7 +23,7 @@ class SMimeValidationConfigurationWidget : public QWidget
     Q_OBJECT
 public:
     explicit SMimeValidationConfigurationWidget(QWidget *parent = nullptr, Qt::WindowFlags f = {});
-    ~SMimeValidationConfigurationWidget();
+    ~SMimeValidationConfigurationWidget() override;
 
 public Q_SLOTS:
     void load();
@@ -36,7 +36,6 @@ Q_SIGNALS:
 private:
     class Private;
     kdtools::pimpl_ptr<Private> d;
-    Q_PRIVATE_SLOT(d, void enableDisableActions())
 };
 
 }

@@ -29,7 +29,7 @@ class Controller : public QObject, protected ExecutionContextUser
 public:
     explicit Controller(QObject *parent = nullptr);
     explicit Controller(const std::shared_ptr<const ExecutionContext> &cmd, QObject *parent = nullptr);
-    ~Controller();
+    ~Controller() override;
 
     using ExecutionContextUser::setExecutionContext;
 
@@ -47,14 +47,23 @@ protected Q_SLOTS:
     void taskDone(const std::shared_ptr<const Kleo::Crypto::Task::Result> &);
 
 Q_SIGNALS:
+    /**
+     * Private signal, you can connect to it, but derived classes cannot emit it.
+     */
+    void error(int err, const QString &details
+    # ifndef DOXYGEN_SHOULD_SKIP_THIS
+        , QPrivateSignal
+    #endif
+    );
 
-#ifndef Q_MOC_RUN
-# ifndef DOXYGEN_SHOULD_SKIP_THIS
-private: // don't tell moc or doxygen, but those signals are in fact private
-# endif
-#endif
-    void error(int err, const QString &details);
-    void done();
+    /**
+     * Private signal, you can connect to it, but derived classes cannot emit it.
+     */
+    void done(
+    # ifndef DOXYGEN_SHOULD_SKIP_THIS
+        QPrivateSignal
+    #endif
+    );
 
 private:
     class Private;

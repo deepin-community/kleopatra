@@ -12,15 +12,20 @@
 
 #include "openpgpkeycardwidget.h"
 
+#include "settings.h"
+
 #include "smartcard/p15card.h"
 #include "smartcard/openpgpcard.h"
 #include "smartcard/readerstatus.h"
+
+#include "commands/learncardkeyscommand.h"
 
 #include <QVBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
 #include <QScrollArea>
 #include <QStringList>
+#include <QPushButton>
 
 #include <KLocalizedString>
 #include <KSeparator>
@@ -41,6 +46,7 @@
 
 using namespace Kleo;
 using namespace Kleo::SmartCard;
+using namespace Kleo::Commands;
 
 P15CardWidget::P15CardWidget(QWidget *parent)
     : QWidget{parent}
@@ -105,8 +111,7 @@ void P15CardWidget::searchPGPFpr(const std::string &fpr)
     /* Only do auto import from LDAP */
     auto conf = QGpgME::cryptoConfig();
     Q_ASSERT (conf);
-    const auto entry = getCryptoConfigEntry(conf, engineIsVersion(2, 3, 0)? "dirmngr" : "gpg", "keyserver");
-    if (!entry || !entry->stringValue().startsWith(QStringLiteral("ldap"))) {
+    if (!Settings().alwaysSearchCardOnKeyserver() && !Kleo::keyserver().startsWith(QLatin1String{"ldap"})) {
         return;
     }
     mStatusLabel->setText(i18n("Searching in directory service..."));
@@ -167,4 +172,24 @@ void P15CardWidget::setCard(const P15Card *card)
     if (cardHasOpenPGPKeys) {
         mOpenPGPKeysWidget->update(card);
     }
+
+    /* Check if additional keys could be available */
+    if (!Settings().autoLoadP15Certs()) {
+        return;
+    }
+    for (const auto &info: card->keyInfos()) {
+        const auto key = KeyCache::instance()->findSubkeyByKeyGrip(info.grip);
+        if (key.isNull()) {
+            auto cmd = new LearnCardKeysCommand(GpgME::CMS);
+            cmd->setParentWidget(this);
+            cmd->setShowsOutputWindow(false);
+            qCDebug(KLEOPATRA_LOG) << "Did not find:" << info.grip.c_str() << "Starting gpgsm --learn.";
+            cmd->start();
+            connect(cmd, &Command::finished, this, [] () {
+                qCDebug(KLEOPATRA_LOG) << "Learn command finished.";
+            });
+            return;
+        }
+    }
+    qCDebug(KLEOPATRA_LOG) << "All certificates from card cached - Not learning.";
 }

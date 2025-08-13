@@ -3,10 +3,9 @@
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
 %:
-	dh $@ --with kf5
+	dh $@
 
-override_dh_auto_install:
-	dh_auto_install
+execute_after_dh_auto_install:
 	find debian/kleopatra -name '*.so' -type l -delete
 
 override_dh_auto_test:

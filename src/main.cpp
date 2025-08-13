@@ -16,8 +16,9 @@
 #include "kleopatraapplication.h"
 #include "mainwindow.h"
 
-#include <kcoreaddons_version.h>
-#if KCOREADDONS_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include "accessibility/accessiblewidgetfactory.h"
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <Kdelibs4ConfigMigrator>
 #endif
 
@@ -56,6 +57,7 @@
 #include <KMessageBox>
 #include <KCrash>
 
+#include <QAccessible>
 #include <QTextDocument> // for Qt::escape
 #include <QMessageBox>
 #include <QTimer>
@@ -96,16 +98,36 @@ static void fillKeyCache(Kleo::UiServer *server)
 
 int main(int argc, char **argv)
 {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
+#endif
     KleopatraApplication app(argc, argv);
     KCrash::initialize();
-
+    QAccessible::installFactory(Kleo::accessibleWidgetFactory);
 
     QElapsedTimer timer;
     timer.start();
 
+    // Initialize GpgME
+    {
+        const GpgME::Error gpgmeInitError = GpgME::initializeLibrary(0);
+        if (gpgmeInitError) {
+            KMessageBox::error(nullptr, xi18nc("@info",
+                                        "<para>The version of the <application>GpgME</application> library you are running against "
+                                        "is older than the one that the <application>GpgME++</application> library was built against.</para>"
+                                        "<para><application>Kleopatra</application> will not function in this setting.</para>"
+                                        "<para>Please ask your administrator for help in resolving this issue.</para>"),
+                            i18nc("@title", "GpgME Too Old"));
+            return EXIT_FAILURE;
+        }
+        qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: GPGME Initialized";
+    }
+
     KLocalizedString::setApplicationDomain("kleopatra");
+
+    AboutData aboutData;
+    KAboutData::setApplicationData(aboutData);
 
     if (Kleo::userIsElevated()) {
         /* This is a safeguard against bugreports that something fails because
@@ -144,17 +166,13 @@ int main(int argc, char **argv)
     app.init();
     qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: Application initialized";
 
-    AboutData aboutData;
-
-    KAboutData::setApplicationData(aboutData);
-
     QCommandLineParser parser;
     aboutData.setupCommandLine(&parser);
     kleopatra_options(&parser);
 
     parser.process(QApplication::arguments());
     aboutData.processCommandLine(&parser);
-#if KCOREADDONS_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     Kdelibs4ConfigMigrator migrate(QStringLiteral("kleopatra"));
     migrate.setConfigFiles(QStringList() << QStringLiteral("kleopatrarc")
                                          << QStringLiteral("libkleopatrarc"));
@@ -163,38 +181,25 @@ int main(int argc, char **argv)
 #endif
     qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: Application created";
 
-    // Initialize GpgME
-    const GpgME::Error gpgmeInitError = GpgME::initializeLibrary(0);
-
     {
         const unsigned int threads = QThreadPool::globalInstance()->maxThreadCount();
         QThreadPool::globalInstance()->setMaxThreadCount(qMax(2U, threads));
     }
-    if (gpgmeInitError) {
-        KMessageBox::sorry(nullptr, xi18nc("@info",
-                                     "<para>The version of the <application>GpgME</application> library you are running against "
-                                     "is older than the one that the <application>GpgME++</application> library was built against.</para>"
-                                     "<para><application>Kleopatra</application> will not function in this setting.</para>"
-                                     "<para>Please ask your administrator for help in resolving this issue.</para>"),
-                           i18nc("@title", "GpgME Too Old"));
-        return EXIT_FAILURE;
-    }
-
-    qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: GPGME Initialized";
 
     Kleo::ChecksumDefinition::setInstallPath(Kleo::gpg4winInstallPath());
     Kleo::ArchiveDefinition::setInstallPath(Kleo::gnupgInstallPath());
 
     int rc;
-    Kleo::UiServer server(parser.value(QStringLiteral("uiserver-socket")));
+    Kleo::UiServer *server = nullptr;
     try {
+        server = new Kleo::UiServer(parser.value(QStringLiteral("uiserver-socket")));
         qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: UiServer created";
 
-        QObject::connect(&server, &Kleo::UiServer::startKeyManagerRequested, &app, &KleopatraApplication::openOrRaiseMainWindow);
+        QObject::connect(server, &Kleo::UiServer::startKeyManagerRequested, &app, &KleopatraApplication::openOrRaiseMainWindow);
 
-        QObject::connect(&server, &Kleo::UiServer::startConfigDialogRequested, &app, &KleopatraApplication::openOrRaiseConfigDialog);
+        QObject::connect(server, &Kleo::UiServer::startConfigDialogRequested, &app, &KleopatraApplication::openOrRaiseConfigDialog);
 
-#define REGISTER( Command ) server.registerCommandFactory( std::shared_ptr<Kleo::AssuanCommandFactory>( new Kleo::GenericAssuanCommandFactory<Kleo::Command> ) )
+#define REGISTER( Command ) server->registerCommandFactory( std::shared_ptr<Kleo::AssuanCommandFactory>( new Kleo::GenericAssuanCommandFactory<Kleo::Command> ) )
         REGISTER(CreateChecksumsCommand);
         REGISTER(DecryptCommand);
         REGISTER(DecryptFilesCommand);
@@ -215,20 +220,25 @@ int main(int argc, char **argv)
         REGISTER(VerifyFilesCommand);
 #undef REGISTER
 
-        server.start();
+        server->start();
         qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: UiServer started";
     } catch (const std::exception &e) {
         qCDebug(KLEOPATRA_LOG) << "Failed to start UI Server: " << e.what();
 #ifdef Q_OS_WIN
-        // Once there actually is a plugin for other systems then Windows this
-        // error should probably be shown, too. But currently only Windows users need
-        // to care.
+        // We should probably change the UIServer to be only run on Windows at all because
+        // only the Windows Explorer Plugin uses it. But the plan of GnuPG devs as of 2022 is to
+        // change the Windows Explorer Plugin to use the command line and then remove the
+        // UiServer for everyone.
         QMessageBox::information(nullptr, i18n("GPG UI Server Error"),
-                                 i18n("<qt>The Kleopatra GPG UI Server Module could not be initialized.<br/>"
-                                      "The error given was: <b>%1</b><br/>"
-                                      "You can use Kleopatra as a certificate manager, but cryptographic plugins that "
-                                      "rely on a GPG UI Server being present might not work correctly, or at all.</qt>",
-                                      QString::fromUtf8(e.what()).toHtmlEscaped()));
+                                 i18nc("This error message is only shown on Windows when the socket to communicate with "
+                                       "Windows Explorer could not be created. This often times means that the whole installation is "
+                                       "buggy. e.g. GnuPG is not installed at all.",
+                                       "<qt>The Kleopatra Windows Explorer Module could not be initialized.<br/>"
+                                       "The error given was: <b>%1</b><br/>"
+                                       "This likely means that there is a problem with your installation. Try reinstalling or "
+                                       "contact your Administrator for support.<br/>"
+                                       "You can try to continue to use Kleopatra but there might be other problems.</qt>",
+                                       QString::fromUtf8(e.what()).toHtmlEscaped()));
 #endif
     }
     const bool daemon = parser.isSet(QStringLiteral("daemon"));
@@ -241,7 +251,9 @@ int main(int argc, char **argv)
     }
     qCDebug(KLEOPATRA_LOG) << "Startup timing:" << timer.elapsed() << "ms elapsed: SelfCheck completed";
 
-    fillKeyCache(&server);
+    if (server) {
+        fillKeyCache(server);
+    }
 #ifndef QT_NO_SYSTEMTRAYICON
     app.startMonitoringSmartCard();
 #endif
@@ -259,11 +271,14 @@ int main(int argc, char **argv)
     rc = app.exec();
 
     app.setIgnoreNewInstance(true);
-    QObject::disconnect(&server, &Kleo::UiServer::startKeyManagerRequested, &app, &KleopatraApplication::openOrRaiseMainWindow);
-    QObject::disconnect(&server, &Kleo::UiServer::startConfigDialogRequested, &app, &KleopatraApplication::openOrRaiseConfigDialog);
+    QObject::disconnect(server, &Kleo::UiServer::startKeyManagerRequested, &app, &KleopatraApplication::openOrRaiseMainWindow);
+    QObject::disconnect(server, &Kleo::UiServer::startConfigDialogRequested, &app, &KleopatraApplication::openOrRaiseConfigDialog);
 
-    server.stop();
-    server.waitForStopped();
+    if (server) {
+        server->stop();
+        server->waitForStopped();
+        delete server;
+    }
 
     return rc;
 }

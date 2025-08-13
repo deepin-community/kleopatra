@@ -16,17 +16,22 @@
 
 #include "newresultpage.h"
 
+#include <fileoperationspreferences.h>
+#include <settings.h>
+
 #include <KLocalizedString>
 #include <KSharedConfig>
 #include <KColorScheme>
 #include <KConfigGroup>
 #include <KWindowConfig>
-
 #include <KMessageBox>
+#include <KMessageWidget>
 
 #include "kleopatra_debug.h"
+#include <Libkleo/Compliance>
 #include <Libkleo/GnuPG>
 #include <Libkleo/Formatting>
+#include <Libkleo/SystemInfo>
 
 #include <Libkleo/FileNameRequester>
 #include <QWindow>
@@ -36,10 +41,12 @@
 #include <QLabel>
 #include <QIcon>
 #include <QCheckBox>
-
+#include <QPushButton>
+#include <QStyle>
 
 #include <gpgme++/key.h>
 
+#include <array>
 
 using namespace GpgME;
 using namespace Kleo;
@@ -52,6 +59,76 @@ enum Page {
     NumPages
 };
 
+class FileNameRequesterWithIcon : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit FileNameRequesterWithIcon(QDir::Filters filter, QWidget *parent = nullptr)
+        : QWidget(parent)
+    {
+        auto layout = new QHBoxLayout{this};
+        layout->setContentsMargins(0, 0, 0, 0);
+        mIconLabel = new QLabel{this};
+        mRequester = new FileNameRequester{filter, this};
+        mRequester->setExistingOnly(false);
+        layout->addWidget(mIconLabel);
+        layout->addWidget(mRequester);
+
+        setFocusPolicy(mRequester->focusPolicy());
+        setFocusProxy(mRequester);
+
+        connect(mRequester, &FileNameRequester::fileNameChanged,
+                this, &FileNameRequesterWithIcon::fileNameChanged);
+    }
+
+    void setIcon(const QIcon &icon)
+    {
+        mIconLabel->setPixmap(icon.pixmap(32, 32));
+    }
+
+    void setFileName(const QString &name)
+    {
+        mRequester->setFileName(name);
+    }
+
+    QString fileName() const
+    {
+        return mRequester->fileName();
+    }
+
+    void setNameFilter(const QString &nameFilter)
+    {
+        mRequester->setNameFilter(nameFilter);
+    }
+
+    QString nameFilter() const
+    {
+        return mRequester->nameFilter();
+    }
+
+    FileNameRequester *requester()
+    {
+        return mRequester;
+    }
+
+Q_SIGNALS:
+    void fileNameChanged(const QString &filename);
+
+protected:
+    bool event(QEvent *e) override
+    {
+        if (e->type() == QEvent::ToolTipChange) {
+            mRequester->setToolTip(toolTip());
+        }
+        return QWidget::event(e);
+    }
+
+private:
+    QLabel *mIconLabel;
+    FileNameRequester *mRequester;
+};
+
 class SigEncPage: public QWizardPage
 {
     Q_OBJECT
@@ -62,37 +139,67 @@ public:
           mParent((SignEncryptFilesWizard *) parent),
           mWidget(new SignEncryptWidget),
           mOutLayout(new QVBoxLayout),
+          mOutputLabel{nullptr},
           mArchive(false),
-          mUseOutputDir(false)
+          mUseOutputDir(false),
+          mSingleFile{true}
     {
         setTitle(i18nc("@title", "Sign / Encrypt Files"));
         auto vLay = new QVBoxLayout(this);
         vLay->setContentsMargins(0, 0, 0, 0);
+        if (!Settings{}.cmsEnabled()) {
+            mWidget->setProtocol(GpgME::OpenPGP);
+        }
+        mWidget->setSignAsText(i18nc("@option:check on SignEncryptPage",
+                                     "&Sign as:"));
+        mWidget->setEncryptForMeText(i18nc("@option:check on SignEncryptPage",
+                                           "Encrypt for &me:"));
+        mWidget->setEncryptForOthersText(i18nc("@option:check on SignEncryptPage",
+                                               "Encrypt for &others:"));
+        mWidget->setEncryptWithPasswordText(i18nc("@option:check on SignEncryptPage",
+                                                  "Encrypt with &password. Anyone you share the password with can read the data."));
         vLay->addWidget(mWidget);
         connect(mWidget, &SignEncryptWidget::operationChanged, this,
                 &SigEncPage::updateCommitButton);
         connect(mWidget, &SignEncryptWidget::keysChanged, this,
                 &SigEncPage::updateFileWidgets);
-        updateCommitButton(mWidget->currentOp());
 
-        auto outputGrp = new QGroupBox(i18n("Output"));
+        auto outputGrp = new QGroupBox(i18nc("@title:group", "Output"));
         outputGrp->setLayout(mOutLayout);
 
         mPlaceholderWidget = new QLabel(i18n("Please select an action."));
         mOutLayout->addWidget(mPlaceholderWidget);
 
-        mUseOutputDirChk = new QCheckBox(i18n("Encrypt / Sign each file separately."));
-        mUseOutputDirChk->setToolTip(i18nc("@info",
-                                            "Keep each file separate instead of creating an archive for all."));
+        mOutputLabel = new QLabel(i18nc("@label on SignEncryptPage", "Output &files/folder:"));
+        mOutLayout->addWidget(mOutputLabel);
 
+        createRequesters(mOutLayout);
+
+        mUseOutputDirChk = new QCheckBox(i18nc("@option:check on SignEncryptPage",
+                                               "Encrypt / Sign &each file separately."));
+        mUseOutputDirChk->setToolTip(i18nc("@info:tooltip",
+                                           "Keep each file separate instead of creating an archive for all."));
         mOutLayout->addWidget(mUseOutputDirChk);
         connect (mUseOutputDirChk, &QCheckBox::toggled, this, [this] (bool state) {
                     mUseOutputDir = state;
-                    mArchive = !mUseOutputDir;
+                    mArchive = !mUseOutputDir && !mSingleFile;
                     updateFileWidgets();
                 });
 
         vLay->addWidget(outputGrp);
+
+        auto messageWidget = new KMessageWidget;
+        messageWidget->setMessageType(KMessageWidget::Error);
+        messageWidget->setIcon(style()->standardIcon(QStyle::SP_MessageBoxCritical, nullptr, this));
+        messageWidget->setText(i18n("Invalid compliance settings for signing and encrypting files."));
+        messageWidget->setToolTip(xi18nc("@info %1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
+                                         "<para>You cannot use <application>Kleopatra</application> for signing or encrypting files "
+                                         "because the <application>GnuPG</application> system used by <application>Kleopatra</application> is not %1.</para>",
+                                         DeVSCompliance::name(true)));
+        messageWidget->setCloseButtonVisible(false);
+        messageWidget->setVisible(DeVSCompliance::isActive() && !DeVSCompliance::isCompliant());
+        vLay->addWidget(messageWidget);
+
         setMinimumHeight(300);
     }
 
@@ -108,7 +215,10 @@ public:
 
     bool isComplete() const override
     {
-        return !mWidget->currentOp().isNull();
+        if (DeVSCompliance::isActive() && !DeVSCompliance::isCompliant()) {
+            return false;
+        }
+        return mWidget->isComplete();
     }
 
     int nextId() const override
@@ -119,6 +229,7 @@ public:
     void initializePage() override
     {
         setCommitPage(true);
+        updateCommitButton(mWidget->currentOp());
     }
 
     void setArchiveForced(bool archive)
@@ -138,8 +249,22 @@ public:
         }
     }
 
+    void setSingleFile(bool singleFile)
+    {
+        mSingleFile = singleFile;
+        mArchive = !mUseOutputDir && !mSingleFile;
+    }
+
     bool validatePage() override
     {
+        if (DeVSCompliance::isActive() && !DeVSCompliance::isCompliant()) {
+            KMessageBox::error(topLevelWidget(),
+                               xi18nc("@info %1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
+                                      "<para>Sorry! You cannot use <application>Kleopatra</application> for signing or encrypting files "
+                                      "because the <application>GnuPG</application> system used by <application>Kleopatra</application> is not %1.</para>",
+                                      DeVSCompliance::name(true)));
+            return false;
+        }
         bool sign = !mWidget->signKey().isNull();
         bool encrypt = !mWidget->selfKey().isNull() || !mWidget->recipients().empty();
         if (!mWidget->validate()) {
@@ -167,17 +292,13 @@ public:
             return true;
         }
 
-        if (!mWidget->selfKey().isNull()) {
+        if (!mWidget->selfKey().isNull() || mWidget->encryptSymmetric()) {
             return true;
         }
-        bool hasSecret = false;
-        Q_FOREACH (const Key k, mWidget->recipients()) {
-            if (k.hasSecret()) {
-                hasSecret = true;
-                break;
-            }
-        }
-        if (!hasSecret && !mWidget->encryptSymmetric()) {
+        const auto recipientKeys = recipients();
+        const bool hasSecret = std::any_of(std::begin(recipientKeys), std::end(recipientKeys),
+                                           [](const auto &k) { return k.hasSecret(); });
+        if (!hasSecret) {
             if (KMessageBox::warningContinueCancel(this,
             xi18nc("@info",
             "<para>None of the recipients you are encrypting to seems to be your own.</para>"
@@ -211,54 +332,94 @@ public:
     }
 
 private:
-    QWidget *createRequester(int forKind, QBoxLayout *lay) {
-        static const QMap <int, QString> icons = {
-            { SignEncryptFilesWizard::SignatureCMS, QStringLiteral("document-sign") },
-            { SignEncryptFilesWizard::SignaturePGP, QStringLiteral("document-sign") },
-            { SignEncryptFilesWizard::CombinedPGP,  QStringLiteral("document-edit-sign-encrypt") },
-            { SignEncryptFilesWizard::EncryptedPGP, QStringLiteral("document-encrypt") },
-            { SignEncryptFilesWizard::EncryptedCMS, QStringLiteral("document-encrypt") },
-            { SignEncryptFilesWizard::Directory,    QStringLiteral("folder") }
-        };
-        static const QMap <int, QString> toolTips = {
-            { SignEncryptFilesWizard::SignatureCMS, i18n("The S/MIME signature.") },
-            { SignEncryptFilesWizard::SignaturePGP, i18n("The signature.") },
-            { SignEncryptFilesWizard::CombinedPGP,  i18n("The signed and encrypted file.") },
-            { SignEncryptFilesWizard::EncryptedPGP, i18n("The encrypted file.") },
-            { SignEncryptFilesWizard::EncryptedCMS, i18n("The S/MIME encrypted file.") },
-            { SignEncryptFilesWizard::Directory,    i18n("Output directory.") }
-        };
+    struct RequesterInfo {
+        SignEncryptFilesWizard::KindNames id;
+        QString icon;
+        QString toolTip;
+        QString accessibleName;
+        QString nameFilterBinary;
+        QString nameFilterAscii;
+    };
+    void createRequesters(QBoxLayout *lay) {
+        static const std::array<RequesterInfo, 6> requestersInfo = {{
+            {
+                SignEncryptFilesWizard::SignatureCMS,
+                QStringLiteral("document-sign"),
+                i18nc("@info:tooltip", "This is the filename of the S/MIME signature."),
+                i18nc("Lineedit accessible name", "S/MIME signature file"),
+                i18nc("Name filter binary", "S/MIME Signatures (*.p7s)"),
+                i18nc("Name filter ASCII", "S/MIME Signatures (*.p7s *.pem)"),
+            },
+            {
+                SignEncryptFilesWizard::SignaturePGP,
+                QStringLiteral("document-sign"),
+                i18nc("@info:tooltip", "This is the filename of the detached OpenPGP signature."),
+                i18nc("Lineedit accessible name", "OpenPGP signature file"),
+                i18nc("Name filter binary", "OpenPGP Signatures (*.sig *.pgp)"),
+                i18nc("Name filter ASCII", "OpenPGP Signatures (*.asc *.sig)"),
+            },
+            {
+                SignEncryptFilesWizard::CombinedPGP,
+                QStringLiteral("document-edit-sign-encrypt"),
+                i18nc("@info:tooltip", "This is the filename of the OpenPGP-signed and encrypted file."),
+                i18nc("Lineedit accessible name", "OpenPGP signed and encrypted file"),
+                i18nc("Name filter binary", "OpenPGP Files (*.gpg *.pgp)"),
+                i18nc("Name filter ASCII", "OpenPGP Files (*.asc)"),
+            },
+            {
+                SignEncryptFilesWizard::EncryptedPGP,
+                QStringLiteral("document-encrypt"),
+                i18nc("@info:tooltip", "This is the filename of the OpenPGP encrypted file."),
+                i18nc("Lineedit accessible name", "OpenPGP encrypted file"),
+                i18nc("Name filter binary", "OpenPGP Files (*.gpg *.pgp)"),
+                i18nc("Name filter ASCII", "OpenPGP Files (*.asc)"),
+            },
+            {
+                SignEncryptFilesWizard::EncryptedCMS,
+                QStringLiteral("document-encrypt"),
+                i18nc("@info:tooltip", "This is the filename of the S/MIME encrypted file."),
+                i18nc("Lineedit accessible name", "S/MIME encrypted file"),
+                i18nc("Name filter binary", "S/MIME Files (*.p7m)"),
+                i18nc("Name filter ASCII", "S/MIME Files (*.p7m *.pem)"),
+            },
+            {
+                SignEncryptFilesWizard::Directory,
+                QStringLiteral("folder"),
+                i18nc("@info:tooltip", "The resulting files are written to this directory."),
+                i18nc("Lineedit accessible name", "Output directory"),
+                {},
+                {},
+            },
+        }};
 
-        auto req = new FileNameRequester(forKind == SignEncryptFilesWizard::Directory ?
-                                                       QDir::Dirs : QDir::Files, this);
-        req->setFileName(mOutNames[forKind]);
-        req->setExistingOnly(false);
-        auto hLay = new QHBoxLayout;
-        auto iconLabel = new QLabel;
-        auto ret = new QWidget;
-        iconLabel->setPixmap(QIcon::fromTheme(icons[forKind]).pixmap(32,32));
-        hLay->addWidget(iconLabel);
-        iconLabel->setToolTip(toolTips[forKind]);
-        req->setToolTip(toolTips[forKind]);
-        hLay->addWidget(req);
-        ret->setLayout(hLay);
-        lay->addWidget(ret);
+        if (!mRequesters.empty()) {
+            return;
+        }
+        const bool isAscii = FileOperationsPreferences().addASCIIArmor();
+        for (const auto &requester : requestersInfo) {
+            const auto id = requester.id;
+            auto requesterWithIcon = new FileNameRequesterWithIcon{id == SignEncryptFilesWizard::Directory ? QDir::Dirs : QDir::Files, this};
+            requesterWithIcon->setIcon(QIcon::fromTheme(requester.icon));
+            requesterWithIcon->setToolTip(requester.toolTip);
+            requesterWithIcon->requester()->setAccessibleNameOfLineEdit(requester.accessibleName);
+            requesterWithIcon->setNameFilter(isAscii ? requester.nameFilterAscii : requester.nameFilterBinary);
+            lay->addWidget(requesterWithIcon);
 
-        connect (req, &FileNameRequester::fileNameChanged, this,
-                 [this, forKind](const QString &newName) {
-                    mOutNames[forKind] = newName;
-                 });
-        return ret;
+            connect(requesterWithIcon, &FileNameRequesterWithIcon::fileNameChanged, this, [this, id](const QString &newName) {
+                mOutNames[id] = newName;
+            });
+
+            mRequesters.insert(id, requesterWithIcon);
+        }
     }
 
 public:
     void setOutputNames(const QMap<int, QString> &names) {
         Q_ASSERT(mOutNames.isEmpty());
-        mOutNames = names;
-        const auto keys = mOutNames.keys();
-        for (int i : keys) {
-            mRequester[i] = createRequester(i, mOutLayout);
+        for (auto it = std::begin(names); it != std::end(names); ++it) {
+            mRequesters.value(it.key())->setFileName(it.value());
         }
+        mOutNames = names;
         updateFileWidgets();
     }
 
@@ -277,27 +438,35 @@ public:
     }
 
 private Q_SLOTS:
-    void updateCommitButton(const QString &label)
+    void updateCommitButton(const SignEncryptWidget::Operation op)
     {
-        auto btn = mParent->button(QWizard::CommitButton);
+        if (mParent->currentPage() != this) {
+            return;
+        }
+        QString label;
+        switch (op) {
+        case SignEncryptWidget::Sign:
+            label = i18nc("@action:button", "Sign");
+            break;
+        case SignEncryptWidget::Encrypt:
+            label = i18nc("@action:button", "Encrypt");
+            break;
+        case SignEncryptWidget::SignAndEncrypt:
+            label = i18nc("@action:button", "Sign / Encrypt");
+            break;
+        default:
+            ;
+        };
+        auto btn = qobject_cast<QPushButton*>(mParent->button(QWizard::CommitButton));
         if (!label.isEmpty()) {
-            btn->setText(label);
-            if (Kleo::gpgComplianceP("de-vs")) {
-                bool de_vs = mWidget->isDeVsAndValid();
-                btn->setIcon(QIcon::fromTheme(de_vs
-                                             ? QStringLiteral("security-high")
-                                             : QStringLiteral("security-medium")));
-                btn->setStyleSheet(QStringLiteral("background-color: ") + (de_vs
-                                   ? KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::PositiveBackground).color().name()
-                                   : KColorScheme(QPalette::Active, KColorScheme::View).background(KColorScheme::NegativeBackground).color().name()));
-                mParent->setLabelText(de_vs
-                        ? i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                            "%1 communication possible.", Formatting::deVsString())
-                        : i18nc("%1 is a placeholder for the name of a compliance mode. E.g. NATO RESTRICTED compliant or VS-NfD compliant",
-                            "%1 communication not possible.", Formatting::deVsString()));
+            mParent->setButtonText(QWizard::CommitButton, label);
+            if (DeVSCompliance::isActive()) {
+                const bool de_vs = DeVSCompliance::isCompliant() && mWidget->isDeVsAndValid();
+                DeVSCompliance::decorate(btn, de_vs);
+                mParent->setLabelText(DeVSCompliance::name(de_vs));
             }
         } else {
-            btn->setText(i18n("Next"));
+            mParent->setButtonText(QWizard::CommitButton, i18n("Next"));
             btn->setIcon(QIcon());
             btn->setStyleSheet(QString());
         }
@@ -306,32 +475,37 @@ private Q_SLOTS:
 
     void updateFileWidgets()
     {
-        if (mRequester.isEmpty()) {
+        if (mRequesters.isEmpty()) {
             return;
         }
         const std::vector<Key> recipients = mWidget->recipients();
         const Key sigKey = mWidget->signKey();
-        bool pgp = mWidget->encryptSymmetric();
-        bool cms = false;
+        const bool pgp = mWidget->encryptSymmetric() ||
+                         std::any_of(std::cbegin(recipients), std::cend(recipients),
+                                     [](const auto &k) { return k.protocol() == Protocol::OpenPGP; });
+        const bool cms = std::any_of(std::cbegin(recipients), std::cend(recipients),
+                                     [](const auto &k) { return k.protocol() == Protocol::CMS; });
 
-        for (const Key &k : recipients) {
-            if (pgp && cms) {
-                break;
-            }
-            if (k.protocol() == Protocol::OpenPGP) {
-                pgp = true;
-            } else {
-                cms = true;
-            }
-        }
         mOutLayout->setEnabled(false);
-        mPlaceholderWidget->setVisible(!cms && !pgp && sigKey.isNull());
-        mRequester[SignEncryptFilesWizard::SignatureCMS]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::CMS);
-        mRequester[SignEncryptFilesWizard::EncryptedCMS]->setVisible(!mUseOutputDir && cms);
-        mRequester[SignEncryptFilesWizard::CombinedPGP]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::OpenPGP && pgp);
-        mRequester[SignEncryptFilesWizard::EncryptedPGP]->setVisible(!mUseOutputDir && pgp && sigKey.protocol() != Protocol::OpenPGP);
-        mRequester[SignEncryptFilesWizard::SignaturePGP]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::OpenPGP && !pgp);
-        mRequester[SignEncryptFilesWizard::Directory]->setVisible(mUseOutputDir && !mPlaceholderWidget->isVisible());
+        if (cms || pgp || !sigKey.isNull()) {
+            mPlaceholderWidget->setVisible(false);
+            mOutputLabel->setVisible(true);
+            mRequesters[SignEncryptFilesWizard::SignatureCMS]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::CMS);
+            mRequesters[SignEncryptFilesWizard::EncryptedCMS]->setVisible(!mUseOutputDir && cms);
+            mRequesters[SignEncryptFilesWizard::CombinedPGP]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::OpenPGP && pgp);
+            mRequesters[SignEncryptFilesWizard::EncryptedPGP]->setVisible(!mUseOutputDir && sigKey.protocol() != Protocol::OpenPGP && pgp);
+            mRequesters[SignEncryptFilesWizard::SignaturePGP]->setVisible(!mUseOutputDir && sigKey.protocol() == Protocol::OpenPGP && !pgp);
+            mRequesters[SignEncryptFilesWizard::Directory]->setVisible(mUseOutputDir);
+            auto firstNotHidden = std::find_if(std::cbegin(mRequesters), std::cend(mRequesters),
+                                               [](auto w) { return !w->isHidden(); });
+            mOutputLabel->setBuddy(*firstNotHidden);
+        } else {
+            mPlaceholderWidget->setVisible(true);
+            mOutputLabel->setVisible(false);
+            std::for_each(std::cbegin(mRequesters), std::cend(mRequesters),
+                          [](auto w) { w->setVisible(false); });
+            mOutputLabel->setBuddy(nullptr);
+        }
         mOutLayout->setEnabled(true);
     }
 
@@ -339,12 +513,14 @@ private:
     SignEncryptFilesWizard *mParent;
     SignEncryptWidget *mWidget;
     QMap <int, QString> mOutNames;
-    QMap <int, QWidget *> mRequester;
+    QMap <int, FileNameRequesterWithIcon *> mRequesters;
     QVBoxLayout *mOutLayout;
     QWidget *mPlaceholderWidget;
     QCheckBox *mUseOutputDirChk;
+    QLabel *mOutputLabel;
     bool mArchive;
     bool mUseOutputDir;
+    bool mSingleFile;
 };
 
 class ResultPage : public NewResultPage
@@ -375,7 +551,7 @@ SignEncryptFilesWizard::SignEncryptFilesWizard(QWidget *parent, Qt::WindowFlags 
 {
     readConfig();
 
-    bool de_vs = Kleo::gpgComplianceP("de-vs");
+    const bool de_vs = DeVSCompliance::isActive();
 #ifdef Q_OS_WIN
     // Enforce modern style to avoid vista style ugliness.
     setWizardStyle(QWizard::ModernStyle);
@@ -388,28 +564,25 @@ SignEncryptFilesWizard::SignEncryptFilesWizard(QWidget *parent, Qt::WindowFlags 
     setPage(SigEncPageId, mSigEncPage);
     setPage(ResultPageId, mResultPage);
     setOptions(QWizard::IndependentPages |
-               (de_vs ? QWizard::HaveCustomButton1 : (QWizard::WizardOption) 0) |
+               (de_vs ? QWizard::HaveCustomButton1 : QWizard::WizardOption(0)) |
                QWizard::NoBackButtonOnLastPage |
                QWizard::NoBackButtonOnStartPage);
 
     if (de_vs) {
         /* We use a custom button to display a label next to the
            buttons.  */
-        mLabel = button(QWizard::CustomButton1);
+        auto btn = button(QWizard::CustomButton1);
         /* We style the button so that it looks and acts like a
            label.  */
-        mLabel->setStyleSheet(QStringLiteral("border: none"));
-        mLabel->setFocusPolicy(Qt::NoFocus);
-    } else {
-        mLabel = nullptr;
+        btn->setStyleSheet(QStringLiteral("border: none"));
+        btn->setFocusPolicy(Qt::NoFocus);
     }
 }
 
-void SignEncryptFilesWizard::setLabelText(const QString &label) const
+void SignEncryptFilesWizard::setLabelText(const QString &label)
 {
-    if (mLabel) {
-        mLabel->setText(label);
-    }
+    button(QWizard::CommitButton)->setToolTip(label);
+    setButtonText(QWizard::CustomButton1, label);
 }
 
 void SignEncryptFilesWizard::slotCurrentIdChanged(int id)
@@ -459,6 +632,11 @@ void SignEncryptFilesWizard::setArchiveForced(bool archive)
 void SignEncryptFilesWizard::setArchiveMutable(bool archive)
 {
     mSigEncPage->setArchiveMutable(archive);
+}
+
+void SignEncryptFilesWizard::setSingleFile(bool singleFile)
+{
+    mSigEncPage->setSingleFile(singleFile);
 }
 
 std::vector<Key> SignEncryptFilesWizard::resolvedRecipients() const

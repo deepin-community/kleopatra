@@ -1,5 +1,5 @@
 /* -*- mode: c++; c-basic-offset:4 -*-
-    commands/exportsecretkeycommand.h
+    commands/exportpaperkeycommand.h
 
     This file is part of Kleopatra, the KDE keymanager
     SPDX-FileCopyrightText: 2016 Bundesamt für Sicherheit in der Informationstechnik
@@ -32,7 +32,7 @@ public:
 
     static Restrictions restrictions()
     {
-        return OnlyOneKey | NeedSecretKey | MustBeOpenPGP;
+        return OnlyOneKey | NeedSecretKeyData | MustBeOpenPGP;
     }
 
 protected Q_SLOTS:
